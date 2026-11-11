@@ -1,4 +1,5 @@
 import json
+import copy
 from collections import defaultdict
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, BatchFeature
 from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPredictionWithValueHead
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
+from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
 
 def huber_loss(e, d):
     a = (abs(e) <= d).to(torch.float32)
@@ -76,6 +78,13 @@ class OpenVLAPolicy:
 
         self.vla.print_trainable_parameters()
 
+        self.teacher_vla = None
+        if getattr(self.args, "alg_name", "ppo") == "sdpo":
+            self.teacher_vla = copy.deepcopy(self.vla)
+            self.teacher_vla.eval()
+            for parameter in self.teacher_vla.parameters():
+                parameter.requires_grad_(False)
+
         # openvla: optimizer
         self.params_vh = None
         self.params_vla = None
@@ -108,7 +117,7 @@ class OpenVLAPolicy:
         self.vh_optimizer = AdamW(self.params_vh, lr=self.args.vla_vhlr, betas=betas)
         self.vla_optimizer = AdamW(self.params_vla, lr=self.args.vla_lr, betas=betas)
 
-    def _preprocess_obs(self, x: dict, action: torch.Tensor = None) -> BatchFeature:
+    def _preprocess_obs(self, x: dict, action: torch.Tensor = None, feedback=None) -> BatchFeature:
         images = x["image"]
         task_description = x["task_description"]
 
@@ -133,8 +142,17 @@ class OpenVLAPolicy:
             # action = action.cpu().numpy() # [B, dim]
             action_str = self.tokenizer.batch_decode(action)
 
-            task_prompt = [f"In: What action should the robot take to {t.lower()}?\nOut: {a}</s>"
-                           for t, a in zip(task_description, action_str)]
+            feedback = feedback or [None] * len(task_description)
+            feedback_sections = [
+                f"Privileged state feedback for the teacher: {item}\n" if item else ""
+                for item in feedback
+            ]
+            task_prompt = [
+                f"In: What action should the robot take to {t.lower()}?\n"
+                f"{feedback_section}"
+                f"Out: {a}</s>"
+                for t, a, feedback_section in zip(task_description, action_str, feedback_sections)
+            ]
 
         inputs = self.processor(task_prompt, images, padding=True)
         inputs = inputs.to(**self.tpdv)
@@ -208,11 +226,49 @@ class OpenVLAPolicy:
 
         return logprobs, entropy, values
 
+    def evaluate_action_logits(self, x: dict, action: torch.Tensor, feedback=None) -> torch.Tensor:
+        """Return exact 256-bin action logits for an unchanged action token sequence."""
+        features = self._preprocess_obs(x, action, feedback=feedback)
+        result = self.vla.evaluate_action(
+            **features,
+            unnorm_key=self.args.vla_unnorm_key,
+            return_action_logits=True,
+        )
+        return result[3]
+
+    def evaluate_teacher_action_logits(self, x: dict, action: torch.Tensor, feedback=None) -> torch.Tensor:
+        if self.teacher_vla is None:
+            raise RuntimeError("SDPO teacher is not initialized; set alg_name=sdpo")
+        features = self._preprocess_obs(x, action, feedback=feedback)
+        with torch.no_grad():
+            result = self.teacher_vla.evaluate_action(
+                **features,
+                unnorm_key=self.args.vla_unnorm_key,
+                return_action_logits=True,
+            )
+        return result[3]
+
+    @torch.no_grad()
+    def update_teacher_ema(self, rate: float):
+        if self.teacher_vla is None:
+            return
+        if not 0.0 < rate <= 1.0:
+            raise ValueError("sdpo_ema_rate must be in (0, 1]")
+        student = dict(self.vla.named_parameters())
+        for name, teacher_parameter in self.teacher_vla.named_parameters():
+            student_parameter = student.get(name)
+            if student_parameter is not None:
+                teacher_parameter.data.lerp_(student_parameter.data, rate)
+
     def prep_rollout(self):
         self.vla.eval()
+        if self.teacher_vla is not None:
+            self.teacher_vla.eval()
 
     def prep_training(self):
         self.vla.train()
+        if self.teacher_vla is not None:
+            self.teacher_vla.eval()
 
     def save(self, path: Path):
         path.mkdir(parents=True, exist_ok=True)
@@ -223,6 +279,8 @@ class OpenVLAPolicy:
             "vh_optimizer": self.vh_optimizer.state_dict(),
             "vla_optimizer": self.vla_optimizer.state_dict(),
         }
+        if self.teacher_vla is not None:
+            training_state["teacher"] = self.teacher_vla.state_dict()
         torch.save(training_state, path / "training_state.pt")
 
         json.dump(self.vla.base_model.norm_stats, open(path / "dataset_statistics.json", "w"))
@@ -254,6 +312,8 @@ class OpenVLAPolicy:
             self.vla.value_head.load_state_dict(training_state['vh'], assign=True)
         else:
             print("Warning: value_head state not found in training_state")
+        if self.teacher_vla is not None and "teacher" in training_state:
+            self.teacher_vla.load_state_dict(training_state["teacher"])
 
         self._setup_optimizer()
         self.vh_optimizer.load_state_dict(training_state['vh_optimizer'])
@@ -433,3 +493,45 @@ class OpenVLAPPO:
             final_info[key] = np.mean(value)
 
         return final_info
+
+    def train_sdpo_step(self, idx, total, batch):
+        obs_image, instruct, actions, _value_preds, _returns, _masks, _old_logprob, _advantages, feedback = batch
+        obs = dict(image=torch.tensor(obs_image).to(self.tpdv["device"]), task_description=instruct)
+        actions = torch.tensor(actions, device=self.tpdv["device"], dtype=torch.long)
+        feedback_text = [record.text if record is not None else None for record in feedback]
+        mode = getattr(self.args, "sdpo_feedback_mode", "correct")
+        if mode == "none":
+            feedback_text = [None] * len(feedback_text)
+        elif mode == "shuffled":
+            feedback_text = feedback_text[1:] + feedback_text[:1]
+        elif mode != "correct":
+            raise ValueError(f"Unknown sdpo_feedback_mode: {mode}")
+
+        student_logits = self.policy.evaluate_action_logits(obs, actions)
+        teacher_logits = self.policy.evaluate_teacher_action_logits(obs, actions, feedback=feedback_text)
+        valid_mask = torch.ones(student_logits.shape[:-1], dtype=torch.bool, device=student_logits.device)
+        loss = reverse_kl_student_to_teacher(student_logits, teacher_logits, valid_mask)
+        (loss / self.args.alg_gradient_accum).backward()
+
+        grad_norm = None
+        if idx % self.args.alg_gradient_accum == self.args.alg_gradient_accum - 1 or idx == total - 1:
+            grad_norm = nn.utils.clip_grad_norm_(self.policy.params_vla, self.ppo_grad_norm)
+            self.policy.vla_optimizer.step()
+            self.policy.vla_optimizer.zero_grad()
+            self.policy.update_teacher_ema(self.args.sdpo_ema_rate)
+        return {"loss": loss.item(), "valid_tokens": float(valid_mask.sum().item()),
+                "teacher_student_kl": loss.item(),
+                **({"grad_norm": grad_norm.item()} if grad_norm is not None else {})}
+
+    def train_sdpo(self, buffer):
+        train_info = defaultdict(list)
+        minibatch_count = buffer.get_minibatch_count()
+        for _ in range(self.args.alg_ppo_epoch):
+            for idx, batch in tqdm(
+                enumerate(buffer.feed_forward_generator(include_feedback=True)),
+                total=minibatch_count,
+                desc="sdpo",
+            ):
+                for key, value in self.train_sdpo_step(idx, minibatch_count, batch).items():
+                    train_info[key].append(value)
+        return {key: np.mean(value) for key, value in train_info.items()}

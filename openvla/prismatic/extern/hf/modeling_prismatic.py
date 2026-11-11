@@ -654,8 +654,9 @@ class OpenVLAForActionPredictionWithValueHead(PrismaticForConditionalGeneration)
             attention_mask: torch.Tensor,
             pixel_values: torch.FloatTensor,
             labels: torch.LongTensor,
-            unnorm_key: str
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            unnorm_key: str,
+            return_action_logits: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         action_len = self.get_action_dim(unnorm_key)
 
         # check last token is `</s>`
@@ -715,6 +716,8 @@ class OpenVLAForActionPredictionWithValueHead(PrismaticForConditionalGeneration)
         entropy = -(probs_tensor * logprobs_tensor).sum(dim=-1)  # [B, action_len]
         entropy = entropy.mean(dim=-1, keepdim=True) # [B, 1]
 
+        if return_action_logits:
+            return logprobs, entropy, values, logits_tensor
         return logprobs, entropy, values
 
     def get_value(self,

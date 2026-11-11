@@ -1,4 +1,5 @@
 import os
+import json
 import pprint
 import random
 import gc
@@ -69,11 +70,13 @@ class Args:
     vla_temperature_eval: float = 0.6
 
     # ppo & grpo
-    alg_name: str = "ppo"  # ppo, grpo
+    alg_name: str = "ppo"  # ppo, grpo, sdpo
     alg_grpo_fix: bool = True
     alg_gradient_accum: int = 20
     alg_ppo_epoch: int = 1
     alg_entropy_coef: float = 0.0
+    sdpo_ema_rate: float = 0.01
+    sdpo_feedback_mode: str = "correct"  # correct, shuffled, none
 
     # other
     wandb: bool = True
@@ -87,7 +90,7 @@ class Runner:
         self.args = all_args
 
         # alg_name
-        assert self.args.alg_name in ["ppo", "grpo"]
+        assert self.args.alg_name in ["ppo", "grpo", "sdpo"]
 
         # set seed
         np.random.seed(self.args.seed)
@@ -191,6 +194,8 @@ class Runner:
             train_info = self.alg.train_ppo(self.buffer)
         elif self.args.alg_name == "grpo":
             train_info = self.alg.train_grpo(self.buffer)
+        elif self.args.alg_name == "sdpo":
+            train_info = self.alg.train_sdpo(self.buffer)
         else:
             raise ValueError(f"Unknown alg_name: {self.args.alg_name}")
 
@@ -199,6 +204,19 @@ class Runner:
         info["buffer/mask_mean"] = np.mean(1.0 - self.buffer.masks)
 
         return info
+
+    def save_feedback_archive(self, episode: int):
+        """Persist decision-time privileged records for audit; never used as student input."""
+        feedback_dir = self.glob_dir / "feedback"
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        path = feedback_dir / f"episode_{episode:06d}.jsonl"
+        with path.open("w", encoding="utf-8") as handle:
+            for decision_index in range(self.args.episode_len):
+                for env_index in range(self.args.num_envs):
+                    record = self.buffer.feedback[decision_index][env_index]
+                    if record is not None:
+                        handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+        return path
 
     @torch.no_grad()
     def eval(self, obj_set: str) -> dict:
@@ -348,6 +366,8 @@ class Runner:
             # steps
             steps = (episode + 1) * self.args.episode_len * self.args.num_envs
             print(pprint.pformat({k: round(np.mean(v), 4) for k, v in env_infos.items()}))
+            feedback_path = self.save_feedback_archive(episode)
+            print(f"Saved feedback archive: {feedback_path}")
 
             # train and process infos
             self.compute_endup()

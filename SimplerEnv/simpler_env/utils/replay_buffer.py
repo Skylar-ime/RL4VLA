@@ -98,7 +98,7 @@ class SeparatedReplayBuffer(object):
 
         return num_mini_batch
 
-    def feed_forward_generator(self):
+    def feed_forward_generator(self, include_feedback=False):
         episode_length, n_rollout_threads = self.rewards.shape[:2]
         batch_size = episode_length * n_rollout_threads
 
@@ -109,7 +109,11 @@ class SeparatedReplayBuffer(object):
             num_mini_batch = batch_size // self.buffer_minibatch
 
         rand = torch.randperm(batch_size).numpy()
-        sampler = [rand[i * self.buffer_minibatch:(i + 1) * self.buffer_minibatch] for i in range(num_mini_batch)]
+        if self.buffer_minibatch < 0:
+            sampler = [rand]
+        else:
+            sampler = [rand[i * self.buffer_minibatch:(i + 1) * self.buffer_minibatch]
+                       for i in range(num_mini_batch)]
 
         obs = self.obs[:-1].reshape(-1, *self.obs.shape[2:])
         actions = self.actions.reshape(-1, self.actions.shape[-1])
@@ -118,6 +122,7 @@ class SeparatedReplayBuffer(object):
         masks = self.masks[:-1].reshape(-1, 1)
         action_logits = self.action_log_probs.reshape(-1, self.action_log_probs.shape[-1])
         advantages = self.advantages.reshape(-1, 1)
+        feedback = np.asarray(self.feedback, dtype=object).reshape(-1)
 
         for indices in sampler:
             # obs size [T+1 N Dim]-->[T N Dim]-->[T*N,Dim]-->[index,Dim]
@@ -128,10 +133,12 @@ class SeparatedReplayBuffer(object):
             masks_batch = masks[indices]
             old_action_logits_batch = action_logits[indices]
             adv_targ = advantages[indices]
+            feedback_batch = feedback[indices].tolist()
 
             # instruct
             instruct_indices = indices % n_rollout_threads
             instruct_batch = [self.instruction[i] for i in instruct_indices]
 
-            yield (obs_batch, instruct_batch, actions_batch, value_preds_batch, return_batch, masks_batch,
-                   old_action_logits_batch, adv_targ)
+            batch = (obs_batch, instruct_batch, actions_batch, value_preds_batch, return_batch, masks_batch,
+                     old_action_logits_batch, adv_targ)
+            yield batch + (feedback_batch,) if include_feedback else batch
