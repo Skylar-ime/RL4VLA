@@ -88,7 +88,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 历史多 seed runner 记录：这些 SDPO run 使用旧的 decode/re-tokenize 路径，后来发现不保持原 action token IDs；因此只能作为失败工程记录，不能作为 SDPO 方法结果。对应 W&B 历史保留，不用于结论。
 - 旧 PPO 短跑为 seed `0` `wandb/offline-run-20261112_010051-svov1bhf`、seed `1` `...012321-xcbqtdaz`、seed `2` `...014423-nsp9nu6w`；这些 run 也受后述 joint log-prob 广播错误影响，仅作工程记录。
 - 旧 `SEEDS=1` 记录同时存在 `NUM_ENVS=1` shuffled 退化和 action token 对齐缺陷；保留 W&B 历史，但不作为实验结论。
-- runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
+- runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录。2026-11-12 对 30 个短程 run 执行 `python -m wandb sync` 时，CLI 虽打印 `done`，但 `wandb/debug-cli.skylar.log` 记录每次 `upsert_run` 均为 HTTP 403；云端上传**未验证成功**。CLI 还错误生成 `.synced` 标记；凭据/网络修复后重试须加 `--include-synced`，并用 W&B API 或项目页面核验，不能仅依赖 CLI 退出码或 `.synced` 文件。
 - Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`、抓持 `4/6`。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
 - 旧 correct SDPO checkpoint 评估 run `wandb/offline-run-20261112_024330-ml6drwkc`、旧 shuffled checkpoint 评估 run `wandb/offline-run-20261112_030731-hhom6kc2` 均受 action token 对齐缺陷影响，不能作为 SDPO 结果。
 - 旧 seed `0` PPO checkpoint 测试 success `2/6`、抓持 `6/6`；W&B run `wandb/offline-run-20261112_025659-skfiyjg2`。checkpoint 训练受 joint log-prob 广播错误影响，不作为公平 PPO 基线。
