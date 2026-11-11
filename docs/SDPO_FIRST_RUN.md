@@ -89,6 +89,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - `compileall`：通过。
 - reverse-KL smoke：通过，梯度仅到学生。
 - 模型级同权重/同上下文检查：新初始化的 SDPO 学生与 EMA 教师均在 `eval()` 模式，对同一正常观测、同一原始动作 token 做 teacher forcing，反馈均为空；两分支 action logits 形状均为 `[2,7,256]`，最大绝对差 `0`，reverse-KL `0`。本地 W&B run `wandb/offline-run-20261112_062920-vtk34eoa`。这验证无反馈时的分布/位置对齐，不证明反馈质量。
+- 模型级更新检查：同配置 8-step SDPO 闭环前后，比较全部 878 个可训练非 value-head tensor；学生参数变化 L1 总和 `16560.87`，EMA 教师变化 `344.35`，二者终点差 `16229.82`，且教师参数均 `requires_grad=False`。W&B 本地 run `wandb/offline-run-20261112_063221-ypcmqin0`；checkpoint 和反馈归档已保存。仅验证更新方向与 EMA 非零变化，不代表效果收益。
 - rollout buffer feedback smoke：通过，含 `buffer-minibatch=-1` 全量采样路径。
 - 真实 GPU smoke：通过。`PutOnPlateInScene25Main-v3` 单环境单步完成 rollout、反馈归档、SDPO 更新、EMA、评估和 checkpoint 保存；WandB 本地 run 为 `wandb/offline-run-20261111_231030-gouf9xje`，训练 loss `4.898`、有效 token `7`。
 - checkpoint 恢复 smoke：通过。以 `glob/steps_0000` 重载时日志确认 `SDPO teacher load: restored EMA state` 与 optimizer 恢复。
