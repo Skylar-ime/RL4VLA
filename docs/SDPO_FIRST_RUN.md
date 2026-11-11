@@ -60,6 +60,7 @@ SEEDS="0 1 2" EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
 - checkpoint 恢复 smoke：通过。以 `glob/steps_0000` 重载时日志确认 `SDPO teacher load: restored EMA state` 与 optimizer 恢复。
 - 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf`，loss `0.0005`；正确反馈 SDPO 如上；两环境 shuffled run `wandb/offline-run-20261111_233517-3j4mumpi`，loss `4.0515`；无反馈 SDPO run `wandb/offline-run-20261111_234118-699ie136`，loss `0.0`。shuffled 使用 `num-envs=2`，确认发生跨环境错配。
 - 8 步短程对照：correct SDPO run `wandb/offline-run-20261111_234727-xpt1cfj5`，两次更新 loss `5.0716 -> 4.0652`；同预算 PPO run `wandb/offline-run-20261111_235243-6p5nhm1d`，两次更新 loss `6.4629 -> 0.8897`。两组独立评估成功率均为 `0`，不能据此宣称收益。
+- 多 seed runner 实测：`SEEDS=1` 四臂完整执行。PPO run `wandb/offline-run-20261111_235914-d9pl81r3`；correct SDPO `wandb/offline-run-20261112_000141-dzls42b0`，loss `3.7707 -> 3.3984`；shuffled SDPO `wandb/offline-run-20261112_000606-ixfs3qyh`，loss `3.8235 -> 3.5134`；none SDPO `wandb/offline-run-20261112_001143-xwvfbvfm`，loss `0.0016 -> 0.0062`。各组独立评估 success 均为 `0`。
 
 ## 未完成门槛
 
