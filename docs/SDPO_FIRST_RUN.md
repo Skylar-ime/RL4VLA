@@ -72,6 +72,8 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 同一冻结 PPO seed0 checkpoint 的 OOD smoke：`PutOnPlateInScene25VisionImage-v1` success `2/2`（W&B `wandb/offline-run-20261112_032920-8yxyjxq5`）；`PutOnPlateInScene25PositionChangeTo-v1` success `0/2`（W&B `wandb/offline-run-20261112_033145-yrb0c0ed`）。每个环境仅 2 个 episode，只证明环境入口和评估协议可运行，不代表泛化结论。
 
+组合辨别 OOD smoke：`PutOnPlateInScene25Instruct-v1` success `2/2`（W&B `wandb/offline-run-20261112_033635-yuzgo7ql`）。样本极少，仅作协议连通性记录。
+
 ## 已验证
 
 - `compileall`：通过。
