@@ -22,10 +22,13 @@ if (( NUM_ENVS < 1 || EVAL_EPISODES < 1 || EVAL_EPISODES % NUM_ENVS != 0 )); the
     exit 2
 fi
 
-if [[ ! -f "$CHECKPOINT_MANIFEST" ]]; then
+if [[ "$CHECKPOINT_MANIFEST" != "-" && ! -f "$CHECKPOINT_MANIFEST" ]]; then
     echo "checkpoint manifest not found: $CHECKPOINT_MANIFEST" >&2
     exit 2
 fi
+
+manifest_input="$CHECKPOINT_MANIFEST"
+[[ "$manifest_input" == "-" ]] && manifest_input=/dev/stdin
 
 while IFS=$'\t' read -r label checkpoint; do
     [[ -z "$label" || "$label" == \#* ]] && continue
@@ -45,7 +48,6 @@ while IFS=$'\t' read -r label checkpoint; do
             --eval-only \
             --eval-episodes "$EVAL_EPISODES" \
             --eval-obj-set "$EVAL_OBJ_SET" \
-            --name "${label}-${env_id}-${EVAL_OBJ_SET}" \
-            --wandb true
+            --name "${label}-${env_id}-${EVAL_OBJ_SET}"
     done
-done < "$CHECKPOINT_MANIFEST"
+done < "$manifest_input"

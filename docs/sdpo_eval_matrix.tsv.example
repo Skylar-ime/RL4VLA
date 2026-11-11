@@ -4,3 +4,4 @@
 # warmup\t/path/to/warmup/adapter
 # ppo-seed0\t/path/to/ppo/glob/steps_0000
 # sdpo-correct-seed0\t/path/to/sdpo/glob/steps_0000
+# Use CHECKPOINT_MANIFEST=- to read the same TSV from stdin.
