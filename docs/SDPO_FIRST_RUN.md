@@ -16,6 +16,7 @@
 conda activate rlvla_env
 cd /home/skylar/@lab/RL4VLA
 PYTHONPATH=SimplerEnv:ManiSkill:openvla \
+MS_ASSET_DIR=/home/skylar/@lab/hf-cache/maniskill \
 python SimplerEnv/simpler_env/train_ms3_ppo.py \
   --alg-name sdpo \
   --env-id PutOnPlateInScene25Main-v3 \
