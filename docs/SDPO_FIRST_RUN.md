@@ -42,6 +42,15 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 - SDPO checkpoint 同目录写入 `sdpo_protocol.json`，记录 divergence、EMA、action support、反馈模式及 PPO/advantage 开关。
 - WandB 默认在线记录；若服务端返回认证或网络错误，可设置 `WANDB_MODE=offline`，仍保留本地 run、配置和指标归档。
 
+## 多 seed 对照入口
+
+`SimplerEnv/scripts/run_sdpo_comparison.sh` 固定同一初始化和任务，依次运行 PPO、correct SDPO、shuffled SDPO、none SDPO。默认是 3 个 seed、每个 8 步的短跑；正式实验前显式设置 `EPISODE_LEN`、`STEPS_MAX` 和 `WANDB_MODE`，避免误启动长任务。
+
+```bash
+SEEDS="0 1 2" EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
+  bash SimplerEnv/scripts/run_sdpo_comparison.sh
+```
+
 ## 已验证
 
 - `compileall`：通过。
