@@ -102,6 +102,10 @@ class OpenVLAPolicy:
                 else:
                     print("Warning: value_head state not found in training_state")
 
+                if self.teacher_vla is not None and "teacher" in training_state:
+                    self.teacher_vla.load_state_dict(training_state["teacher"])
+                    print("SDPO teacher load: restored EMA state")
+
                 self._setup_optimizer()
                 self.vh_optimizer.load_state_dict(training_state['vh_optimizer'])
                 self.vla_optimizer.load_state_dict(training_state['vla_optimizer'])
