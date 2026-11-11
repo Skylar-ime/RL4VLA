@@ -1,7 +1,9 @@
 import torch
+from transformers import BatchFeature
 
 from simpler_env.feedback import build_rel_spatial_feedback
 from simpler_env.env.simpler_wrapper import completed_episode_info
+from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
 
 
@@ -72,3 +74,24 @@ def test_completed_episode_metrics_include_only_done_environments():
     assert info["episode_env_ids"] == [1, 2]
     assert info["episode"]["success"] == [1.0, 0.0]
     assert info["episode"]["is_src_obj_grasped"] == [1.0, 0.0]
+
+
+def test_action_token_append_preserves_raw_ids():
+    policy = object.__new__(OpenVLAPolicy)
+
+    class Tokenizer:
+        pad_token_id = 0
+        bos_token_id = 1
+        eos_token_id = 2
+
+    policy.tokenizer = Tokenizer()
+    prefix = BatchFeature(data={
+        "input_ids": torch.tensor([[0, 1, 29871], [0, 1, 29871]]),
+        "attention_mask": torch.tensor([[0, 1, 1], [0, 1, 1]]),
+        "pixel_values": torch.zeros((2, 3, 2, 2)),
+    })
+    actions = torch.tensor([[31744, 31999], [31800, 31801]])
+    result = policy._append_action_tokens(prefix, actions)
+    assert result["input_ids"][0, -3:-1].tolist() == [31744, 31999]
+    assert result["input_ids"][1, -3:-1].tolist() == [31800, 31801]
+    assert result["input_ids"][0, -1].item() == 2

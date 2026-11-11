@@ -94,6 +94,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
 - 训练 W&B 指标现包含 `time/rollout_seconds`、`time/update_seconds`、`time/eval_*_seconds`、`feedback/effective_ratio`；SDPO 更新另记录 `time/student_forward_seconds`、`time/teacher_forward_seconds`、`time/update_seconds`，用于拆分环境采样、教师评分和参数更新成本。
 - 新指标 GPU smoke 已完成：W&B run `wandb/offline-run-20261112_034227-fq3j7953`，完成 8 environment steps、反馈归档、SDPO 更新、EMA、checkpoint 和 ID/OOD 评估；对应 checkpoint 位于该 run 的 `glob/steps_0000`。
+- 修正 action token 对齐：训练前缀现在直接拼接 rollout 原始 token IDs，不再执行 decode/re-tokenize；实测完整 action-bin 词表 decode/re-tokenize round-trip 不成立（`256` 个 token 变为 `257` 个），故旧路径不满足原序列保持要求。修复后的真实 8-step SDPO smoke：W&B `wandb/offline-run-20261112_040926-ne1cou7z`，`feedback/effective_ratio=1.0`、`train/loss=3.6186`、学生前向 `0.3651 s`、教师前向 `0.2449 s`、更新 `0.2413 s`，checkpoint 与协议文件已保存。
 
 ## 未完成门槛
 

@@ -142,30 +142,67 @@ class OpenVLAPolicy:
         if action is None:
             task_prompt = [f"In: What action should the robot take to {t.lower()}?\nOut: "
                            for t in task_description]
+            inputs = self.processor(task_prompt, images, padding=True)
         else:
             assert isinstance(action, torch.Tensor)
-            # action = action.cpu().numpy() # [B, dim]
-            action_str = self.tokenizer.batch_decode(action)
-
             feedback = feedback or [None] * len(task_description)
             feedback_sections = [
                 f"Privileged state feedback for the teacher: {item}\n" if item else ""
                 for item in feedback
             ]
-            task_prompt = [
+            prefix_prompt = [
                 f"In: What action should the robot take to {t.lower()}?\n"
                 f"{feedback_section}"
-                f"Out: {a}</s>"
-                for t, a, feedback_section in zip(task_description, action_str, feedback_sections)
+                "Out: "
+                for t, feedback_section in zip(task_description, feedback_sections)
             ]
+            prefix_inputs = self.processor(prefix_prompt, images, padding=True)
+            inputs = self._append_action_tokens(prefix_inputs, action)
 
-        inputs = self.processor(task_prompt, images, padding=True)
         inputs = inputs.to(**self.tpdv)
 
         if action is not None:
             inputs["labels"] = inputs["input_ids"].clone()
 
         return inputs
+
+    def _append_action_tokens(self, prefix_inputs: BatchFeature, action: torch.Tensor) -> BatchFeature:
+        """Append raw action IDs; never decode and re-tokenize action sequences."""
+        action = action.detach().to(device="cpu", dtype=torch.long)
+        prefix_ids = prefix_inputs["input_ids"].detach().to(device="cpu", dtype=torch.long)
+        prefix_mask = prefix_inputs["attention_mask"].detach().to(device="cpu", dtype=torch.bool)
+        if action.ndim != 2 or action.shape[0] != prefix_ids.shape[0]:
+            raise ValueError("action tokens must have shape [batch, action_dim]")
+        if not torch.all((action >= 32000 - 256) & (action < 32000)):
+            raise ValueError("action tokens must stay inside OpenVLA's 256-token support")
+
+        eos = torch.full((1,), self.tokenizer.eos_token_id, dtype=torch.long)
+        sequences = []
+        for index in range(prefix_ids.shape[0]):
+            prefix = prefix_ids[index][prefix_mask[index]]
+            if prefix.numel() == 0 or prefix[0].item() != self.tokenizer.bos_token_id:
+                raise ValueError("action prefix must start with the tokenizer BOS token")
+            if prefix.numel() == 0 or prefix[-1].item() != 29871:
+                raise ValueError("action prefix must end with OpenVLA space token 29871")
+            sequences.append(torch.cat((prefix[1:], action[index], eos)))
+
+        max_length = max(sequence.numel() + 1 for sequence in sequences)
+        input_ids = torch.full(
+            (len(sequences), max_length), self.tokenizer.pad_token_id, dtype=torch.long
+        )
+        attention_mask = torch.zeros((len(sequences), max_length), dtype=torch.long)
+        for index, sequence in enumerate(sequences):
+            start = max_length - sequence.numel() - 1
+            input_ids[index, start + 1:] = sequence
+            attention_mask[index, start + 1:] = 1
+            input_ids[index, 0] = self.tokenizer.bos_token_id
+            attention_mask[index, 0] = 1
+
+        return BatchFeature(data={
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "pixel_values": prefix_inputs["pixel_values"],
+        })
 
     def get_action(self, x: dict, deterministic) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         temperature = self.args.vla_temperature_eval if deterministic else self.args.vla_temperature
