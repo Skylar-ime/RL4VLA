@@ -161,7 +161,7 @@ class Runner:
         return value, action, logprob
 
     def insert(self, data):
-        obs_img, actions, logprob, value_preds, rewards, done = data
+        obs_img, actions, logprob, value_preds, rewards, done, feedback = data
         masks = 1.0 - done.to(torch.float32)
 
         obs_img = obs_img.cpu().numpy()
@@ -171,7 +171,7 @@ class Runner:
         rewards = rewards.cpu().numpy()
         masks = masks.cpu().numpy()
 
-        self.buffer.insert(obs_img, actions, logprob, value_preds, rewards, masks)
+        self.buffer.insert(obs_img, actions, logprob, value_preds, rewards, masks, feedback)
 
     def compute_endup(self):
         self.policy.prep_rollout()
@@ -334,9 +334,10 @@ class Runner:
 
             for _ in tqdm(range(self.args.episode_len), desc="rollout"):
                 value, action, logprob = self.collect()
+                feedback = self.env.capture_feedback()
                 obs_img, reward, done, env_info = self.env.step(action)
 
-                data = (obs_img, action, logprob, value, reward, done)
+                data = (obs_img, action, logprob, value, reward, done, feedback)
                 self.insert(data)
 
                 # info

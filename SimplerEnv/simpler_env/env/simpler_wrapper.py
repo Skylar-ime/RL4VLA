@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from mani_skill.envs.sapien_env import BaseEnv
+from simpler_env.feedback import build_rel_spatial_feedback
 
 
 class SimlerWrapper:
@@ -30,6 +31,8 @@ class SimlerWrapper:
 
         # variables
         self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32)  # [B, 1]
+        self.episode_ids = [None] * self.num_envs
+        self.decision_index = [0] * self.num_envs
 
         # constants
         bins = np.linspace(-1, 1, 256)
@@ -101,8 +104,43 @@ class SimlerWrapper:
         instruction = self.env.unwrapped.get_language_instruction()
 
         self.reward_old = torch.zeros(self.num_envs, 1, dtype=torch.float32).to(obs_image.device)  # [B, 1]
+        episode_seed = getattr(self.env.unwrapped, "_episode_seed", [None] * self.num_envs)
+        self.episode_ids = [int(x) for x in episode_seed]
+        self.decision_index = [0] * self.num_envs
 
         return obs_image, instruction, info
+
+    def capture_feedback(self):
+        """Capture privileged state before action execution, aligned to current observation."""
+        task = self.env.unwrapped
+        extra = getattr(task, "extra_stats", {})
+        episode_stats = getattr(task, "episode_stats", {})
+        source_name = getattr(task, "source_obj_name", None)
+        target_name = getattr(task, "target_obj_name", None)
+        source_names = source_name if isinstance(source_name, (list, tuple)) else [source_name] * self.num_envs
+        target_names = target_name if isinstance(target_name, (list, tuple)) else [target_name] * self.num_envs
+
+        def at(values, index):
+            if values is None:
+                return None
+            try:
+                return values[index]
+            except (IndexError, KeyError, TypeError):
+                return values
+
+        records = []
+        for index in range(self.num_envs):
+            record = build_rel_spatial_feedback(
+                episode_id=self.episode_ids[index], decision_index=self.decision_index[index],
+                source_name=source_names[index], target_name=target_names[index],
+                source_position=at(extra.get("extra_pos_carrot"), index),
+                target_position=at(extra.get("extra_pos_plate"), index),
+                gripper_position=at(extra.get("extra_pos_gripper"), index),
+                source_grasped=at(episode_stats.get("is_src_obj_grasped"), index),
+            )
+            self.decision_index[index] += 1
+            records.append(record)
+        return records
 
     def step(self, raw_action):
         action = self._process_action(raw_action)

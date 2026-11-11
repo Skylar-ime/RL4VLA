@@ -16,6 +16,8 @@ class SeparatedReplayBuffer(object):
         self.returns = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
         self.actions = np.zeros((self.ep_len, self.num_env, act_dim), dtype=np.int32)
         self.action_log_probs = np.zeros((self.ep_len, self.num_env, act_dim), dtype=np.float32)
+        self.feedback = [[None for _ in range(self.num_env)] for _ in range(self.ep_len)]
+        self.decision_timestamps = [[None for _ in range(self.num_env)] for _ in range(self.ep_len)]
         self.rewards = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
         self.masks = np.ones((self.ep_len + 1, self.num_env, 1), dtype=np.float32)
 
@@ -23,13 +25,21 @@ class SeparatedReplayBuffer(object):
 
         self.step = 0
 
-    def insert(self, obs, actions, action_log_probs, value_preds, rewards, masks):
+    def insert(self, obs, actions, action_log_probs, value_preds, rewards, masks, feedback=None):
         self.obs[self.step + 1] = obs.copy()
         self.actions[self.step] = actions.copy()
         self.action_log_probs[self.step] = action_log_probs.copy()
         self.value_preds[self.step] = value_preds.copy()
         self.rewards[self.step] = rewards.copy()
         self.masks[self.step + 1] = masks.copy()
+        if feedback is not None:
+            if len(feedback) != self.num_env:
+                raise ValueError("feedback batch size must match num_env")
+            for env_index, record in enumerate(feedback):
+                self.feedback[self.step][env_index] = record
+                self.decision_timestamps[self.step][env_index] = (
+                    record.timestamp_utc if record is not None else None
+                )
 
         self.step = (self.step + 1) % self.ep_len
 
