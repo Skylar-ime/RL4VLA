@@ -19,4 +19,6 @@ __pycache__
 /openvla/wandb/
 /SimpleEnv/octo_collect/
 /SimpleEnv/wandb/
+/wandb/
+/ManiSkill/.eggs/
 
