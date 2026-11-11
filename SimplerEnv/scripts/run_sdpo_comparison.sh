@@ -11,6 +11,7 @@ cd "$(dirname "$0")/../.."
 : "${STEPS_MAX:=8}"
 : "${NUM_ENVS:=2}"
 : "${WANDB_MODE:=online}"
+: "${SAVE_RENDER:=false}"
 
 export MS_ASSET_DIR WANDB_MODE
 export PYTHONPATH="SimplerEnv:ManiSkill:openvla${PYTHONPATH:+:${PYTHONPATH}}"
@@ -28,6 +29,9 @@ run_arm() {
     local extra=()
     if [[ "$alg" == "sdpo" ]]; then
         extra+=(--sdpo-feedback-mode "$feedback_mode")
+    fi
+    if [[ "$SAVE_RENDER" == "false" ]]; then
+        extra+=(--no-save-render)
     fi
 
     conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \

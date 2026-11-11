@@ -46,6 +46,8 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 `SimplerEnv/scripts/run_sdpo_comparison.sh` 固定同一初始化和任务，依次运行 PPO、correct SDPO、shuffled SDPO、none SDPO。默认是 3 个 seed、每个 8 步的短跑；正式实验前显式设置 `EPISODE_LEN`、`STEPS_MAX` 和 `WANDB_MODE`，避免误启动长任务。
 
+批量 runner 默认关闭视频保存（`SAVE_RENDER=false`），避免每个 7B checkpoint 生成多 GB 视频；需要视频时显式设置 `SAVE_RENDER=true`。
+
 ```bash
 SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh

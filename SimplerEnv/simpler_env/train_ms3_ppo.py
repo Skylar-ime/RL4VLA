@@ -86,6 +86,7 @@ class Args:
     wandb: bool = True
     only_render: bool = False
     render_info: bool = False
+    save_render: bool = True
 
 
 
@@ -468,8 +469,9 @@ class Runner:
                 save_path = self.glob_dir / f"steps_{episode:0>4d}"
                 self.policy.save(save_path)
 
-                self.render(epoch=episode, obj_set="train")
-                self.render(epoch=episode, obj_set="test")
+                if self.args.save_render:
+                    self.render(epoch=episode, obj_set="train")
+                    self.render(epoch=episode, obj_set="test")
 
 
 def main():
