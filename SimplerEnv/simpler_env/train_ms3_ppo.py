@@ -394,6 +394,8 @@ class Runner:
             env_infos = defaultdict(lambda: [])
             ep_time = time.time()
             rollout_time = time.time()
+            for device_index in range(torch.cuda.device_count()):
+                torch.cuda.reset_peak_memory_stats(device_index)
 
             obs_img, instruction, info = self.env.reset(obj_set="train", same_init=self.args.use_same_init)
             self.buffer.warmup(obs_img.cpu().numpy(), instruction)
@@ -442,6 +444,13 @@ class Runner:
             infos["time/update_seconds"] = update_seconds
             infos["time/episode_seconds"] = time.time() - ep_time
             infos["feedback/effective_ratio"] = feedback_count / max(feedback_total, 1)
+            for device_index in range(torch.cuda.device_count()):
+                infos[f"gpu/cuda_{device_index}_peak_allocated_gib"] = (
+                    torch.cuda.max_memory_allocated(device_index) / (1024 ** 3)
+                )
+                infos[f"gpu/cuda_{device_index}_peak_reserved_gib"] = (
+                    torch.cuda.max_memory_reserved(device_index) / (1024 ** 3)
+                )
 
             # log
             wandb.log(infos, step=steps)

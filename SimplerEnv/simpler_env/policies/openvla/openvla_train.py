@@ -459,6 +459,7 @@ class OpenVLAPPO:
             policy_loss=policy_loss.item(),
             value_loss=value_loss.item(),
             entropy_loss=entropy_loss.item(),
+            policy_entropy=entropy_loss.item(),
             ratio=ratio.mean().item(),
             ratio_median=ratio.median().item(),
             ratio_2=(logprob - old_logprob).mean().exp().item(),
@@ -514,6 +515,7 @@ class OpenVLAPPO:
             loss=loss.item(),
             policy_loss=policy_loss.item(),
             entropy_loss=entropy_loss.item(),
+            policy_entropy=entropy_loss.item(),
             ratio=ratio.mean().item(),
             ratio_median=ratio.median().item(),
             ratio_2=(logprob - old_logprob).mean().exp().item(),
@@ -588,6 +590,9 @@ class OpenVLAPPO:
         teacher_logits = self.policy.evaluate_teacher_action_logits(obs, actions, feedback=feedback_text)
         teacher_seconds = time.perf_counter() - teacher_time
         valid_mask = torch.ones(student_logits.shape[:-1], dtype=torch.bool, device=student_logits.device)
+        with torch.no_grad():
+            student_log_probs = torch.log_softmax(student_logits.detach().float(), dim=-1)
+            policy_entropy = -(student_log_probs.exp() * student_log_probs).sum(dim=-1).mean()
         loss = reverse_kl_student_to_teacher(student_logits, teacher_logits, valid_mask)
         (loss / self.args.alg_gradient_accum).backward()
 
@@ -601,6 +606,7 @@ class OpenVLAPPO:
             self.policy.update_teacher_ema(self.args.sdpo_ema_rate)
             update_seconds = time.perf_counter() - update_time
         return {"loss": loss.item(), "valid_tokens": float(valid_mask.sum().item()),
+                "policy_entropy": policy_entropy.item(),
                 "teacher_student_kl": loss.item(),
                 "time/student_forward_seconds": student_seconds,
                 "time/teacher_forward_seconds": teacher_seconds,
