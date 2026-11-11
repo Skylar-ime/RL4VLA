@@ -99,9 +99,10 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 ## 未完成门槛
 
-- `pytest` 未安装；5 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
+- `pytest` 未安装；7 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
-- 修复后仅完成 1 次 8-step SDPO 闭环 smoke；正式三 seed 对照必须重新运行，尚需更长训练和更多独立评估 episode。
+- 修复后已完成三 seed 的 8-step 短程矩阵；尚需在确认训练预算后增加训练步数和独立评估 episode。
 - 紧凑 EMA checkpoint smoke：修复后 SDPO checkpoint 目录约 `1.1 GB`（旧实现约 `15 GB`，因重复保存冻结 base teacher）；恢复日志确认 `SDPO teacher load: restored EMA state`、optimizer 恢复。W&B run `wandb/offline-run-20261112_042912-ajbcmztx`，恢复评估 run `wandb/offline-run-20261112_043206-izyhhz44`。
 - 修复 raw action-token 对齐后的正式短程矩阵已完成：`SEEDS="0 1 2"`、`NUM_ENVS=2`、`EPISODE_LEN=4`、`STEPS_MAX=8`、`SAVE_RENDER=false`，共 12 个本地 W&B run。PPO run：seed0 `wandb/offline-run-20261112_043438-tlo6v5c5`、seed1 `wandb/offline-run-20261112_044318-w7bxs0uw`、seed2 `wandb/offline-run-20261112_045151-69kcb8as`；correct SDPO：seed0 `wandb/offline-run-20261112_043644-jdehu819`、seed1 `wandb/offline-run-20261112_044523-po0i3j3e`、seed2 `wandb/offline-run-20261112_045354-pe0zmezo`；shuffled SDPO：seed0 `wandb/offline-run-20261112_043852-1reaud5l`、seed1 `wandb/offline-run-20261112_044733-hdz55eow`、seed2 `wandb/offline-run-20261112_045607-rw6o7bsb`；none SDPO：seed0 `wandb/offline-run-20261112_044104-yyr81arh`、seed1 `wandb/offline-run-20261112_044942-fqj6s2hy`、seed2 `wandb/offline-run-20261112_045815-m6e6u99i`。这组仅用于验证矩阵、W&B 归档、checkpoint 保存和反馈模式可重复运行，不作为成功率或方法优越性结论；当前 W&B 在线认证仍返回 HTTP 403，恢复凭据后可逐目录执行 `wandb sync`。
+- 对这 12 个新 checkpoint 的固定测试集短评估已完成：`PutOnPlateInScene25Main-v3`、episode ID `0,1`、`EPISODE_LEN=8`、`NUM_ENVS=2`、评估 seed `0`。PPO、correct、shuffled、none 四组的三个训练 seed 均为 success `0/2`、grasp `0/2`；逐 run 记录在 `wandb/offline-run-20261112_051418-w7en3dtd` 至 `wandb/offline-run-20261112_053536-8fxtto9z` 的 `glob/eval_only.jsonl`。此前尝试 `EPISODE_LEN=80`、6 episode 的首个 run `wandb/offline-run-20261112_050619-v6ai4iwu` 未完成且无结果，已停止。8 步评估不足以判定任务成功率，不能据此推断反馈是否有效；正式预算待确认。
