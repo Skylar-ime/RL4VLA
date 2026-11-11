@@ -109,7 +109,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 ## 未完成门槛
 
-- `pytest` 未安装；10 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
+- `pytest` 未安装；11 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 修复后已完成三 seed 的 8-step 短程矩阵；尚需在确认训练预算后增加训练步数和独立评估 episode。
@@ -118,5 +118,6 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 对这 12 个新 checkpoint 的固定测试集短评估已完成：`PutOnPlateInScene25Main-v3`、episode ID `0,1`、`EPISODE_LEN=8`、`NUM_ENVS=2`、评估 seed `0`。PPO、correct、shuffled、none 四组的三个训练 seed 均为 success `0/2`、grasp `0/2`；逐 run 记录在 `wandb/offline-run-20261112_051418-w7en3dtd` 至 `wandb/offline-run-20261112_053536-8fxtto9z` 的 `glob/eval_only.jsonl`。此前尝试 `EPISODE_LEN=80`、6 episode 的首个 run `wandb/offline-run-20261112_050619-v6ai4iwu` 未完成且无结果，已停止。8 步评估不足以判定任务成功率，不能据此推断反馈是否有效；正式预算待确认。
 - 修复 PPO joint log-prob 维度：采样和 `evaluate_action` 都返回每条动作序列一个 log-prob（`[B,1]`），旧 buffer 却存为 `[B,7]`，隐式广播导致 policy loss 对 7 个相同 ratio 求和。已将 buffer 存储改为 `[T,N,1]`，并加入打乱 minibatch 后观测、action token、反馈和旧 log-prob 的对齐测试。此前所有 PPO 训练 run（包括上述 12 组短矩阵中的 PPO 三组）不能作为修复后的 PPO 对照；SDPO 分支不使用旧 log-prob，记录仍可作 SDPO 工程短跑。
 - 修复后的 PPO 三 seed 同预算 8-step smoke 均完成并保存 checkpoint：seed0 `wandb/offline-run-20261112_054850-v9fwcdga`、seed1 `wandb/offline-run-20261112_055117-hiej1cxs`、seed2 `wandb/offline-run-20261112_055322-7brwiou7`。同一 `PutOnPlateInScene25Main-v3`、固定 test episode ID `0,1`、`EPISODE_LEN=8` 评估分别为 `wandb/offline-run-20261112_055541-f1lvkk38`、`wandb/offline-run-20261112_055728-3rj230j6`、`wandb/offline-run-20261112_055915-c575yq7x`，均 success `0/2`、grasp `0/2`。这只确认修复后 PPO 闭环及同协议短评估可运行，不是效果比较。
+- 多物体反馈抽查：任务源码使用每槽位 `select_carrot_ids`/`select_plate_ids`；本地 `wandb/offline-run-20261112_062239-6ti6jm99/glob/feedback/episode_000000.jsonl` 的 episode 0/1 分别记录 `hamburger`/`bread`，均不是固定取第一个对象。方向文本已从不自然的 `below of`/`front of` 改为 `below`/`in front of` 等规范英文；六个方向有单元测试，新 checkpoint 协议标记 `feedback_text_version=relspatial-v2-grammatical-directions`。上述旧 SDPO 短跑仍使用旧措辞，不能与未来 v2 训练作等价反馈协议比较。
 - 为避免对照组成本混淆，PPO/GRPO 训练不再生成或归档教师特权反馈；SDPO 不再额外计算未用于蒸馏的 bootstrap value。修正后 seed0 同配置 8-step GPU smoke：PPO `wandb/offline-run-20261112_061417-uwlle4jp`，反馈有效比例 `0`、rollout `10.35 s`、update `3.32 s`；correct SDPO `wandb/offline-run-20261112_061622-f8toi9oq`，反馈有效比例 `1`、rollout `10.53 s`、update `4.87 s`，其中学生前向平均 `0.357 s`、教师前向平均 `0.244 s`。只代表短程单 seed 工程测量；正式预算仍待确认。
 - 训练 W&B 增加统一的 `train/policy_entropy`（256-bin 动作分布，每 token 平均）以及各 CUDA 设备每轮 rollout+update 的 `gpu/cuda_*_peak_allocated_gib` 和 `gpu/cuda_*_peak_reserved_gib`；峰值在评估前读取。8-step GPU smoke：PPO `wandb/offline-run-20261112_062035-50avd3ij`，熵 `1.365`、CUDA 0 峰值已分配 `19.31 GiB`；correct SDPO `wandb/offline-run-20261112_062239-6ti6jm99`，熵 `1.413`、CUDA 0 峰值已分配 `33.83 GiB`。单 seed 测量仅供容量估计，不作为最终成本或收益结论。

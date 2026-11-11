@@ -354,6 +354,7 @@ class OpenVLAPolicy:
                 "token_alignment": "raw rollout action IDs appended after tokenized prefix",
                 "feedback_mode": self.args.sdpo_feedback_mode,
                 "feedback_source": "decision-time privileged RelSpatial state",
+                "feedback_text_version": "relspatial-v2-grammatical-directions",
                 "ppo_policy_loss": False,
                 "advantage_weighting": False,
             }

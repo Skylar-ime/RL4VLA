@@ -64,7 +64,21 @@ def _direction(vector: tuple[float, float, float] | None, deadband_m: float) -> 
 def _state_phrase(name: str, vector: tuple[float, float, float] | None, deadband_m: float) -> str:
     if vector is None:
         return f"{name} position is unknown."
-    return f"{name} is {_direction(vector, deadband_m)} of the gripper ({np.linalg.norm(vector):.3f} m)."
+    return f"{name} is {_relation(vector, 'the gripper', deadband_m)} ({np.linalg.norm(vector):.3f} m)."
+
+
+def _relation(vector: tuple[float, float, float], reference: str, deadband_m: float) -> str:
+    direction = _direction(vector, deadband_m)
+    prepositions = {
+        "left": "left of",
+        "right": "right of",
+        "front": "in front of",
+        "back": "behind",
+        "below": "below",
+        "above": "above",
+        "near": "near",
+    }
+    return f"{prepositions[direction]} {reference}"
 
 
 def build_rel_spatial_feedback(*, episode_id: int | str | None, decision_index: int,
@@ -83,7 +97,7 @@ def build_rel_spatial_feedback(*, episode_id: int | str | None, decision_index: 
     text = " ".join((
         _state_phrase(source_label, source_to_gripper, deadband_m),
         _state_phrase(target_label, target_to_gripper, deadband_m),
-        (f"{source_label} is {_direction(source_to_target, deadband_m)} of {target_label}."
+        (f"{source_label} is {_relation(source_to_target, target_label, deadband_m)}."
          if source_to_target is not None else f"Relation between {source_label} and {target_label} is unknown."),
         f"{source_label} is {'being held' if grasped else 'not being held' if grasped is not None else 'in an unknown grasp state'}.",
         f"The gripper is {'open' if opened else 'closed' if opened is not None else 'in an unknown state'}.",

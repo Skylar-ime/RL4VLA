@@ -40,6 +40,29 @@ def test_rel_spatial_feedback_rejects_invalid_vector_as_unknown():
     assert "position is unknown" in record.text
 
 
+def test_rel_spatial_feedback_uses_grammatical_directions():
+    cases = [
+        ((-0.2, 0.0, 0.0), "left of"),
+        ((0.2, 0.0, 0.0), "right of"),
+        ((0.0, -0.2, 0.0), "in front of"),
+        ((0.0, 0.2, 0.0), "behind"),
+        ((0.0, 0.0, -0.2), "below"),
+        ((0.0, 0.0, 0.2), "above"),
+    ]
+    for offset, phrase in cases:
+        record = build_rel_spatial_feedback(
+            episode_id=0,
+            decision_index=0,
+            source_name="object",
+            target_name="target",
+            source_position=offset,
+            target_position=[0.0, 0.0, 0.0],
+            gripper_position=[0.0, 0.0, 0.0],
+        )
+        assert f"object is {phrase} target." in record.text
+        assert f"object is {phrase} the gripper" in record.text
+
+
 def test_reverse_kl_masks_tokens_and_only_student_gets_gradient():
     student = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]], requires_grad=True)
     teacher = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]], requires_grad=True)
