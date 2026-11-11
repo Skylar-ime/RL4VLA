@@ -40,6 +40,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 - `--sdpo-feedback-mode shuffled`：批内循环错配反馈。
 - `--sdpo-feedback-mode none`：无反馈 EMA 蒸馏。
 - SDPO checkpoint 同目录写入 `sdpo_protocol.json`，记录 divergence、EMA、action support、反馈模式及 PPO/advantage 开关。
+- WandB 默认在线记录；若服务端返回认证或网络错误，可设置 `WANDB_MODE=offline`，仍保留本地 run、配置和指标归档。
 
 ## 已验证
 

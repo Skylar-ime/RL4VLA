@@ -103,7 +103,7 @@ class Runner:
             config=all_args.__dict__,
             project="RLVLA",
             name=self.args.name,
-            mode="online" if self.args.wandb else "offline",
+            mode=os.environ.get("WANDB_MODE", "online") if self.args.wandb else "offline",
         )
         self.save_dir = Path(wandb.run.dir)
         self.glob_dir = Path(wandb.run.dir) / ".." / "glob"
