@@ -81,16 +81,15 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - rollout buffer feedback smoke：通过，含 `buffer-minibatch=-1` 全量采样路径。
 - 真实 GPU smoke：通过。`PutOnPlateInScene25Main-v3` 单环境单步完成 rollout、反馈归档、SDPO 更新、EMA、评估和 checkpoint 保存；WandB 本地 run 为 `wandb/offline-run-20261111_231030-gouf9xje`，训练 loss `4.898`、有效 token `7`。
 - checkpoint 恢复 smoke：通过。以 `glob/steps_0000` 重载时日志确认 `SDPO teacher load: restored EMA state` 与 optimizer 恢复。
-- 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf`，loss `0.0005`；正确反馈 SDPO 如上；两环境 shuffled run `wandb/offline-run-20261111_233517-3j4mumpi`，loss `4.0515`；无反馈 SDPO run `wandb/offline-run-20261111_234118-699ie136`，loss `0.0`。shuffled 使用 `num-envs=2`，确认发生跨环境错配。
-- 8 步短程对照：correct SDPO run `wandb/offline-run-20261111_234727-xpt1cfj5`，两次更新 loss `5.0716 -> 4.0652`；同预算 PPO run `wandb/offline-run-20261111_235243-6p5nhm1d`，两次更新 loss `6.4629 -> 0.8897`。两组独立评估成功率均为 `0`，不能据此宣称收益。
-- 多 seed runner 实测：`SEEDS=1` 四臂完整执行。PPO run `wandb/offline-run-20261111_235914-d9pl81r3`；correct SDPO `wandb/offline-run-20261112_000141-dzls42b0`，loss `3.7707 -> 3.3984`；shuffled SDPO `wandb/offline-run-20261112_000606-ixfs3qyh`，loss `3.8235 -> 3.5134`；none SDPO `wandb/offline-run-20261112_001143-xwvfbvfm`，loss `0.0016 -> 0.0062`。各组独立评估 success 均为 `0`。
-- 有效的三 seed 四臂短跑（`NUM_ENVS=2`、每组总计 `8` steps、episode 长度 `4`）：seed `0` PPO `wandb/offline-run-20261112_010051-svov1bhf`、correct `...010332-wq43zphw`、shuffled `...010826-m1p8fsgh`、none `...011615-1kg76lau`；seed `1` PPO `...012321-xcbqtdaz`、correct `...012610-9yk3vaj8`、shuffled `...013200-gi6ffssq`、none `...013748-j9j0j8be`；seed `2` PPO `...014423-nsp9nu6w`、correct `...014840-7dnb67f4`、shuffled `...015334-fh78t97c`、none `...015914-xaspet2o`。独立评估 success 全为 `0`，仅验证运行闭环，不足以证明方法效果。
-- 上一条 `SEEDS=1` 四臂记录因 `NUM_ENVS=1` 使 shuffled 反馈退化为未错配对照，不能作为有效 shuffled 结果；保留其 W&B 历史，但以本节 `NUM_ENVS=2` 的三 seed 记录为准。
+- 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf` 等 PPO 记录仍可作工程参考；对应 SDPO 记录因旧 action token 对齐缺陷作废。shuffled 使用 `num-envs=2` 的错配逻辑本身已验证，但训练损失不能作方法结果。
+- 8 步短程对照：旧 correct SDPO run `wandb/offline-run-20261111_234727-xpt1cfj5` 与 PPO run `wandb/offline-run-20261111_235243-6p5nhm1d`；SDPO 记录因 token 对齐缺陷作废，PPO 记录保留为工程基线。
+- 历史多 seed runner 记录：这些 SDPO run 使用旧的 decode/re-tokenize 路径，后来发现不保持原 action token IDs；因此只能作为失败工程记录，不能作为 SDPO 方法结果。对应 W&B 历史保留，不用于结论。
+- PPO 部分仍可作为有效短跑记录：`NUM_ENVS=2`、每组总计 `8` steps 的 PPO run 为 seed `0` `wandb/offline-run-20261112_010051-svov1bhf`、seed `1` `...012321-xcbqtdaz`、seed `2` `...014423-nsp9nu6w`；其 SDPO 对照因 token 对齐缺陷全部作废。
+- 旧 `SEEDS=1` 记录同时存在 `NUM_ENVS=1` shuffled 退化和 action token 对齐缺陷；保留 W&B 历史，但不作为实验结论。
 - runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
 - Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`、抓持 `4/6`。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
-- 修正 episode 完成过滤后，seed `0` correct SDPO checkpoint 在同一 6-episode 测试集 success `2/6`、抓持 `4/6`；W&B run `wandb/offline-run-20261112_024330-ml6drwkc`。该结果仅为一个 checkpoint、一个 seed 的小样本信号，不能作为最终收益结论。
-- 同协议 seed `0` PPO checkpoint 测试 success `2/6`、抓持 `6/6`；W&B run `wandb/offline-run-20261112_025659-skfiyjg2`。PPO 与 correct SDPO 均为 success `2/6`；短跑未显示 SDPO 相对 PPO 收益。
-- 同协议 seed `0` shuffled SDPO checkpoint 测试 success `2/6`、抓持 `5/6`；W&B run `wandb/offline-run-20261112_030731-hhom6kc2`。该小样本结果与 correct SDPO 相同，不能证明反馈顺序带来收益。
+- 旧 correct SDPO checkpoint 评估 run `wandb/offline-run-20261112_024330-ml6drwkc`、旧 shuffled checkpoint 评估 run `wandb/offline-run-20261112_030731-hhom6kc2` 均受 action token 对齐缺陷影响，不能作为 SDPO 结果。
+- 同协议 seed `0` PPO checkpoint 测试 success `2/6`、抓持 `6/6`；W&B run `wandb/offline-run-20261112_025659-skfiyjg2`。该 PPO 结果仍可作为有限基线。
 - 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
 - 训练 W&B 指标现包含 `time/rollout_seconds`、`time/update_seconds`、`time/eval_*_seconds`、`feedback/effective_ratio`；SDPO 更新另记录 `time/student_forward_seconds`、`time/teacher_forward_seconds`、`time/update_seconds`，用于拆分环境采样、教师评分和参数更新成本。
 - 新指标 GPU smoke 已完成：W&B run `wandb/offline-run-20261112_034227-fq3j7953`，完成 8 environment steps、反馈归档、SDPO 更新、EMA、checkpoint 和 ID/OOD 评估；对应 checkpoint 位于该 run 的 `glob/steps_0000`。
@@ -101,4 +100,4 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - `pytest` 未安装；5 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
-- 8-step 三 seed 对照每臂只有一个 rollout episode，尚需更长训练和更多独立评估 episode；不能据此下成功率结论。
+- 修复后仅完成 1 次 8-step SDPO 闭环 smoke；正式三 seed 对照必须重新运行，尚需更长训练和更多独立评估 episode。
