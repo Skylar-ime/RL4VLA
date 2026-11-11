@@ -48,5 +48,5 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 - 尚未在本机完成真实 GPU OpenVLA rollout/update/checkpoint 恢复。
 - pytest 未安装；测试文件存在但尚未由 pytest 执行。
-- 当前 gripper-open 字段在环境没有稳定公开状态时写为显式 unknown。
+- gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 需要实际试跑确认 `PutOnPlateInScene25Main-v3`、warm-up checkpoint、显存和模型复制开销。

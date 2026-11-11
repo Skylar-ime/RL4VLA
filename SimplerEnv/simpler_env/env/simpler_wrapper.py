@@ -127,6 +127,15 @@ class SimlerWrapper:
 
         source_names = selected_names("select_carrot_ids", "carrot_names", "model_db_carrot", "source_obj_name")
         target_names = selected_names("select_plate_ids", "plate_names", "model_db_plate", "target_obj_name")
+        gripper_open = None
+        robot = getattr(getattr(task, "agent", None), "robot", None)
+        if robot is not None:
+            active_joints = getattr(robot, "active_joints", [])
+            joint_names = [joint.name for joint in active_joints]
+            gripper_indices = [joint_names.index(name) for name in ("left_finger", "right_finger") if name in joint_names]
+            if gripper_indices:
+                gripper_width = robot.get_qpos()[:, gripper_indices].mean(dim=1)
+                gripper_open = gripper_width > 0.026
 
         def at(values, index):
             if values is None:
@@ -145,6 +154,7 @@ class SimlerWrapper:
                 target_position=at(extra.get("extra_pos_plate"), index),
                 gripper_position=at(extra.get("extra_pos_gripper"), index),
                 source_grasped=at(episode_stats.get("is_src_obj_grasped"), index),
+                gripper_open=at(gripper_open, index),
             )
             self.decision_index[index] += 1
             records.append(record)
