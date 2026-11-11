@@ -4,7 +4,7 @@
 
 - 仓库：`https://github.com/Skylar-ime/RL4VLA.git`
 - 分支：`ex/1111`
-- 基座：原版离散 OpenVLA action head，动作分布为 `256` 个 bin，动作 token 为原 rollout token IDs。
+- 初始化：RL4VLA 官方 warm-up checkpoint `gen-robot/openvla-7b-rlvla-warmup`；未加载 LoRA，动作分布为 `256` 个 bin，动作 token 为原 rollout token IDs。
 - 损失：学生正常 prompt 到 EMA 教师反馈 prompt 的 reverse KL；教师输出停止梯度。
 - 反馈：决策时刻 RelSpatial 状态文本。记录原始位置、关系向量、抓持字段、时间戳和文本到 `wandb` 的 `glob/feedback/episode_*.jsonl`。
 - 坐标约定：SAPIEN 世界坐标；`x<0` left、`x>0` right，`y<0` front、`y>0` back，`z<0` below、`z>0` above；方向死区 `0.01 m`，按最大绝对轴决定文本方向。
@@ -21,8 +21,8 @@ MS_ASSET_DIR=/home/skylar/@lab/hf-cache/maniskill \
 python SimplerEnv/simpler_env/train_ms3_ppo.py \
   --alg-name sdpo \
   --env-id PutOnPlateInScene25Main-v3 \
-  --vla-path openvla/openvla-7b \
-  --vla-load-path /path/to/warmup-lora \
+  --vla-path gen-robot/openvla-7b-rlvla-warmup \
+  --vla-load-path '' \
   --num-envs 1 \
   --episode-len 8 \
   --steps-max 8 \
@@ -47,7 +47,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 ## 未完成门槛
 
-- 尚未在本机完成真实 GPU OpenVLA rollout/update/checkpoint 恢复。
+- 尚未在本机完成真实 GPU OpenVLA rollout/update/checkpoint 恢复；warm-up 权重需先完整下载。
 - pytest 未安装；测试文件存在但尚未由 pytest 执行。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 需要实际试跑确认 `PutOnPlateInScene25Main-v3`、warm-up checkpoint、显存和模型复制开销。
