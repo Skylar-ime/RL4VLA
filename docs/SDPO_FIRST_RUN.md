@@ -49,9 +49,11 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 - rollout buffer feedback smoke：通过，含 `buffer-minibatch=-1` 全量采样路径。
 - 真实 GPU smoke：通过。`PutOnPlateInScene25Main-v3` 单环境单步完成 rollout、反馈归档、SDPO 更新、EMA、评估和 checkpoint 保存；WandB 本地 run 为 `wandb/offline-run-20261111_231030-gouf9xje`，训练 loss `4.898`、有效 token `7`。
 - checkpoint 恢复 smoke：通过。以 `glob/steps_0000` 重载时日志确认 `SDPO teacher load: restored EMA state` 与 optimizer 恢复。
+- 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf`，loss `0.0005`；正确反馈 SDPO 如上；两环境 shuffled run `wandb/offline-run-20261111_233517-3j4mumpi`，loss `4.0515`；无反馈 SDPO run `wandb/offline-run-20261111_234118-699ie136`，loss `0.0`。shuffled 使用 `num-envs=2`，确认发生跨环境错配。
 
 ## 未完成门槛
 
 - pytest 未安装；测试文件存在但尚未由 pytest 执行。
+- 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 需要实际试跑确认 `PutOnPlateInScene25Main-v3`、warm-up checkpoint、显存和模型复制开销。
