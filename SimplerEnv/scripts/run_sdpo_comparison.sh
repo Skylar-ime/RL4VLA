@@ -9,10 +9,16 @@ cd "$(dirname "$0")/../.."
 : "${SEEDS:=0 1 2}"
 : "${EPISODE_LEN:=4}"
 : "${STEPS_MAX:=8}"
-: "${WANDB_MODE:=offline}"
+: "${NUM_ENVS:=2}"
+: "${WANDB_MODE:=online}"
 
 export MS_ASSET_DIR WANDB_MODE
 export PYTHONPATH="SimplerEnv:ManiSkill:openvla${PYTHONPATH:+:${PYTHONPATH}}"
+
+if (( NUM_ENVS < 2 || STEPS_MAX % (EPISODE_LEN * NUM_ENVS) != 0 )); then
+    echo "NUM_ENVS must be at least 2, and STEPS_MAX must be divisible by EPISODE_LEN * NUM_ENVS" >&2
+    exit 2
+fi
 
 run_arm() {
     local seed="$1"
@@ -30,7 +36,7 @@ run_arm() {
         --vla-path "$VLA_PATH" \
         --vla-load-path '' \
         --seed "$seed" \
-        --num-envs 1 \
+        --num-envs "$NUM_ENVS" \
         --episode-len "$EPISODE_LEN" \
         --steps-max "$STEPS_MAX" \
         --buffer-minibatch 2 \

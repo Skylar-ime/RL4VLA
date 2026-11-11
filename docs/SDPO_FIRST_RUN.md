@@ -30,7 +30,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
   --steps-max 8 \
   --buffer-minibatch 1 \
   --alg-gradient-accum 1 \
-  --wandb false \
+  --wandb true \
   --name sdpo-smoke
 ```
 
@@ -47,7 +47,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 `SimplerEnv/scripts/run_sdpo_comparison.sh` 固定同一初始化和任务，依次运行 PPO、correct SDPO、shuffled SDPO、none SDPO。默认是 3 个 seed、每个 8 步的短跑；正式实验前显式设置 `EPISODE_LEN`、`STEPS_MAX` 和 `WANDB_MODE`，避免误启动长任务。
 
 ```bash
-SEEDS="0 1 2" EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
+SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh
 ```
 
@@ -61,10 +61,13 @@ SEEDS="0 1 2" EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
 - 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf`，loss `0.0005`；正确反馈 SDPO 如上；两环境 shuffled run `wandb/offline-run-20261111_233517-3j4mumpi`，loss `4.0515`；无反馈 SDPO run `wandb/offline-run-20261111_234118-699ie136`，loss `0.0`。shuffled 使用 `num-envs=2`，确认发生跨环境错配。
 - 8 步短程对照：correct SDPO run `wandb/offline-run-20261111_234727-xpt1cfj5`，两次更新 loss `5.0716 -> 4.0652`；同预算 PPO run `wandb/offline-run-20261111_235243-6p5nhm1d`，两次更新 loss `6.4629 -> 0.8897`。两组独立评估成功率均为 `0`，不能据此宣称收益。
 - 多 seed runner 实测：`SEEDS=1` 四臂完整执行。PPO run `wandb/offline-run-20261111_235914-d9pl81r3`；correct SDPO `wandb/offline-run-20261112_000141-dzls42b0`，loss `3.7707 -> 3.3984`；shuffled SDPO `wandb/offline-run-20261112_000606-ixfs3qyh`，loss `3.8235 -> 3.5134`；none SDPO `wandb/offline-run-20261112_001143-xwvfbvfm`，loss `0.0016 -> 0.0062`。各组独立评估 success 均为 `0`。
+- 有效的三 seed 四臂短跑（`NUM_ENVS=2`、每组总计 `8` steps、episode 长度 `4`）：seed `0` PPO `wandb/offline-run-20261112_010051-svov1bhf`、correct `...010332-wq43zphw`、shuffled `...010826-m1p8fsgh`、none `...011615-1kg76lau`；seed `1` PPO `...012321-xcbqtdaz`、correct `...012610-9yk3vaj8`、shuffled `...013200-gi6ffssq`、none `...013748-j9j0j8be`；seed `2` PPO `...014423-nsp9nu6w`、correct `...014840-7dnb67f4`、shuffled `...015334-fh78t97c`、none `...015914-xaspet2o`。独立评估 success 全为 `0`，仅验证运行闭环，不足以证明方法效果。
+- 上一条 `SEEDS=1` 四臂记录因 `NUM_ENVS=1` 使 shuffled 反馈退化为未错配对照，不能作为有效 shuffled 结果；保留其 W&B 历史，但以本节 `NUM_ENVS=2` 的三 seed 记录为准。
+- runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
 
 ## 未完成门槛
 
 - pytest 未安装；测试文件存在但尚未由 pytest 执行。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
-- 需要实际试跑确认 `PutOnPlateInScene25Main-v3`、warm-up checkpoint、显存和模型复制开销。
+- 8-step 三 seed 对照每臂只有一个 rollout episode，尚需更长训练和更多独立评估 episode；不能据此下成功率结论。
