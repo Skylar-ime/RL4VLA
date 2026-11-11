@@ -1,10 +1,13 @@
 import torch
+import numpy as np
+from types import SimpleNamespace
 from transformers import BatchFeature
 
 from simpler_env.feedback import build_rel_spatial_feedback
 from simpler_env.env.simpler_wrapper import completed_episode_info
 from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
+from simpler_env.utils.replay_buffer import SeparatedReplayBuffer
 
 
 def test_rel_spatial_feedback_uses_current_positions_and_explicit_unknowns():
@@ -138,3 +141,36 @@ def test_ema_updates_student_parameters_and_keeps_teacher_frozen():
 
     assert policy.teacher_vla.weight.item() == 0.5
     assert not policy.teacher_vla.weight.requires_grad
+
+
+def test_rollout_minibatches_keep_feedback_actions_and_joint_logprobs_aligned():
+    args = SimpleNamespace(episode_len=2, num_envs=2, buffer_gamma=0.99,
+                           buffer_lambda=0.95, buffer_minibatch=2, alg_grpo_fix=False)
+    buffer = SeparatedReplayBuffer(args, obs_dim=(1,), act_dim=7)
+    buffer.warmup(np.array([[10], [20]], dtype=np.uint8), ["first", "second"])
+
+    for step in range(2):
+        records = [SimpleNamespace(timestamp_utc=f"{step}-{env}", text=f"{step}-{env}")
+                   for env in range(2)]
+        buffer.insert(
+            obs=np.array([[11 + step], [21 + step]], dtype=np.uint8),
+            actions=np.array([[31744 + step * 2 + env] * 7 for env in range(2)], dtype=np.int32),
+            action_log_probs=np.array([[-step * 2 - env - 0.5] for env in range(2)], dtype=np.float32),
+            value_preds=np.zeros((2, 1), dtype=np.float32),
+            rewards=np.zeros((2, 1), dtype=np.float32),
+            masks=np.ones((2, 1), dtype=np.float32),
+            feedback=records,
+        )
+
+    seen = set()
+    for batch in buffer.feed_forward_generator(include_feedback=True):
+        observations, instructions, actions, _, _, _, old_logprobs, _, feedback = batch
+        assert old_logprobs.shape == (2, 1)
+        for index, record in enumerate(feedback):
+            step, env = map(int, record.text.split("-"))
+            assert actions[index, 0] == 31744 + step * 2 + env
+            assert observations[index, 0] == (10 if env == 0 else 20) + step
+            assert instructions[index] == ("first" if env == 0 else "second")
+            assert old_logprobs[index, 0] == -step * 2 - env - 0.5
+            seen.add((step, env))
+    assert seen == {(0, 0), (0, 1), (1, 0), (1, 1)}

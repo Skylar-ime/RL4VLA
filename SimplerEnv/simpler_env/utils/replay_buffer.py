@@ -15,7 +15,7 @@ class SeparatedReplayBuffer(object):
         self.value_preds = np.zeros((self.ep_len + 1, self.num_env, 1), dtype=np.float32)
         self.returns = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
         self.actions = np.zeros((self.ep_len, self.num_env, act_dim), dtype=np.int32)
-        self.action_log_probs = np.zeros((self.ep_len, self.num_env, act_dim), dtype=np.float32)
+        self.action_log_probs = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
         self.feedback = [[None for _ in range(self.num_env)] for _ in range(self.ep_len)]
         self.decision_timestamps = [[None for _ in range(self.num_env)] for _ in range(self.ep_len)]
         self.rewards = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
