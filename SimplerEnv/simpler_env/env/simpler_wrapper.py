@@ -30,7 +30,7 @@ class SimlerWrapper:
         self.env.reset(seed=[self.args.seed * 1000 + i + extra_seed for i in range(self.args.num_envs)])
 
         # variables
-        self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32, device=self.env.device)
+        self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32, device=self.env.unwrapped.device)
         self.episode_ids = [None] * self.num_envs
         self.decision_index = [0] * self.num_envs
 
