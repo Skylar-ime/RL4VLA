@@ -259,6 +259,15 @@ class OpenVLAPolicy:
             student_parameter = student.get(name)
             if student_parameter is not None:
                 teacher_parameter.data.lerp_(student_parameter.data, rate)
+        student_buffers = dict(self.vla.named_buffers())
+        for name, teacher_buffer in self.teacher_vla.named_buffers():
+            student_buffer = student_buffers.get(name)
+            if student_buffer is None:
+                continue
+            if teacher_buffer.is_floating_point() or teacher_buffer.is_complex():
+                teacher_buffer.data.lerp_(student_buffer.data, rate)
+            else:
+                teacher_buffer.data.copy_(student_buffer.data)
 
     def prep_rollout(self):
         self.vla.eval()
