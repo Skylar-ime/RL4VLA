@@ -79,7 +79,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 有效的三 seed 四臂短跑（`NUM_ENVS=2`、每组总计 `8` steps、episode 长度 `4`）：seed `0` PPO `wandb/offline-run-20261112_010051-svov1bhf`、correct `...010332-wq43zphw`、shuffled `...010826-m1p8fsgh`、none `...011615-1kg76lau`；seed `1` PPO `...012321-xcbqtdaz`、correct `...012610-9yk3vaj8`、shuffled `...013200-gi6ffssq`、none `...013748-j9j0j8be`；seed `2` PPO `...014423-nsp9nu6w`、correct `...014840-7dnb67f4`、shuffled `...015334-fh78t97c`、none `...015914-xaspet2o`。独立评估 success 全为 `0`，仅验证运行闭环，不足以证明方法效果。
 - 上一条 `SEEDS=1` 四臂记录因 `NUM_ENVS=1` 使 shuffled 反馈退化为未错配对照，不能作为有效 shuffled 结果；保留其 W&B 历史，但以本节 `NUM_ENVS=2` 的三 seed 记录为准。
 - runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
-- Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`；至少 3/6 episode 抓持成功。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
+- Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`、抓持 `4/6`。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
 - 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
 
 ## 未完成门槛
