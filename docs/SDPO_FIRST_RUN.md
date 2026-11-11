@@ -37,6 +37,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 - `--sdpo-feedback-mode correct`：正确反馈，默认。
 - `--sdpo-feedback-mode shuffled`：批内循环错配反馈。
 - `--sdpo-feedback-mode none`：无反馈 EMA 蒸馏。
+- SDPO checkpoint 同目录写入 `sdpo_protocol.json`，记录 divergence、EMA、action support、反馈模式及 PPO/advantage 开关。
 
 ## 已验证
 
