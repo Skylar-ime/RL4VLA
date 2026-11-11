@@ -95,3 +95,46 @@ def test_action_token_append_preserves_raw_ids():
     assert result["input_ids"][0, -3:-1].tolist() == [31744, 31999]
     assert result["input_ids"][1, -3:-1].tolist() == [31800, 31801]
     assert result["input_ids"][0, -1].item() == 2
+
+
+def test_action_token_append_keeps_variable_prefixes_left_padded():
+    policy = object.__new__(OpenVLAPolicy)
+
+    class Tokenizer:
+        pad_token_id = 0
+        bos_token_id = 1
+        eos_token_id = 2
+
+    policy.tokenizer = Tokenizer()
+    prefix = BatchFeature(data={
+        "input_ids": torch.tensor([[0, 0, 1, 10, 29871], [1, 20, 21, 22, 29871]]),
+        "attention_mask": torch.tensor([[0, 0, 1, 1, 1], [1, 1, 1, 1, 1]]),
+        "pixel_values": torch.zeros((2, 3, 2, 2)),
+    })
+    actions = torch.tensor([[31744, 31999], [31800, 31801]])
+
+    result = policy._append_action_tokens(prefix, actions)
+
+    assert result["input_ids"].tolist() == [
+        [1, 0, 0, 10, 29871, 31744, 31999, 2],
+        [1, 20, 21, 22, 29871, 31800, 31801, 2],
+    ]
+    assert result["attention_mask"].tolist() == [
+        [1, 0, 0, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1],
+    ]
+
+
+def test_ema_updates_student_parameters_and_keeps_teacher_frozen():
+    policy = object.__new__(OpenVLAPolicy)
+    policy.vla = torch.nn.Linear(1, 1, bias=False)
+    policy.teacher_vla = torch.nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        policy.vla.weight.fill_(2.0)
+        policy.teacher_vla.weight.fill_(0.0)
+    policy.teacher_vla.weight.requires_grad_(False)
+
+    policy.update_teacher_ema(0.25)
+
+    assert policy.teacher_vla.weight.item() == 0.5
+    assert not policy.teacher_vla.weight.requires_grad

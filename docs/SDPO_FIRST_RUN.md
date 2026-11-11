@@ -99,7 +99,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 ## 未完成门槛
 
-- `pytest` 未安装；7 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
+- `pytest` 未安装；9 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 修复后已完成三 seed 的 8-step 短程矩阵；尚需在确认训练预算后增加训练步数和独立评估 episode。
