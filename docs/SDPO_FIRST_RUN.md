@@ -103,3 +103,4 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 修复后仅完成 1 次 8-step SDPO 闭环 smoke；正式三 seed 对照必须重新运行，尚需更长训练和更多独立评估 episode。
+- 紧凑 EMA checkpoint smoke：修复后 SDPO checkpoint 目录约 `1.1 GB`（旧实现约 `15 GB`，因重复保存冻结 base teacher）；恢复日志确认 `SDPO teacher load: restored EMA state`、optimizer 恢复。W&B run `wandb/offline-run-20261112_042912-ajbcmztx`，恢复评估 run `wandb/offline-run-20261112_043206-izyhhz44`。

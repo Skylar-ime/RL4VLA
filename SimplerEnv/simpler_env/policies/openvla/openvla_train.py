@@ -104,7 +104,7 @@ class OpenVLAPolicy:
                     print("Warning: value_head state not found in training_state")
 
                 if self.teacher_vla is not None and "teacher" in training_state:
-                    self.teacher_vla.load_state_dict(training_state["teacher"])
+                    self.teacher_vla.load_state_dict(training_state["teacher"], strict=False)
                     print("SDPO teacher load: restored EMA state")
 
                 self._setup_optimizer()
@@ -331,7 +331,13 @@ class OpenVLAPolicy:
             "vla_optimizer": self.vla_optimizer.state_dict(),
         }
         if self.teacher_vla is not None:
-            training_state["teacher"] = self.teacher_vla.state_dict()
+            trainable_names = {
+                name for name, parameter in self.vla.named_parameters() if parameter.requires_grad
+            }
+            training_state["teacher"] = {
+                name: value for name, value in self.teacher_vla.state_dict().items()
+                if name in trainable_names
+            }
         torch.save(training_state, path / "training_state.pt")
 
         json.dump(self.vla.base_model.norm_stats, open(path / "dataset_statistics.json", "w"))
@@ -342,6 +348,7 @@ class OpenVLAPolicy:
                 "divergence": "reverse_kl",
                 "teacher_gradient": "stopped",
                 "teacher_regularization": "ema",
+                "teacher_checkpoint_scope": "trainable parameters only; frozen base shared from vla_path",
                 "ema_rate": float(self.args.sdpo_ema_rate),
                 "action_support": "OpenVLA discrete action bins 32000-256:32000",
                 "token_alignment": "raw rollout action IDs appended after tokenized prefix",
@@ -380,7 +387,7 @@ class OpenVLAPolicy:
         else:
             print("Warning: value_head state not found in training_state")
         if self.teacher_vla is not None and "teacher" in training_state:
-            self.teacher_vla.load_state_dict(training_state["teacher"])
+            self.teacher_vla.load_state_dict(training_state["teacher"], strict=False)
 
         self._setup_optimizer()
         self.vh_optimizer.load_state_dict(training_state['vh_optimizer'])
