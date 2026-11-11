@@ -51,6 +51,21 @@ SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh
 ```
 
+## Warm-up 评估基线
+
+可用 `--eval-only` 对未后训练的 warm-up OpenVLA 执行固定测试 episode 评估，不采样训练 rollout、不更新参数。评估 episode ID 与策略随机数种子固定，便于各方法复用相同测试实例；结果写入 W&B，并保存到 `glob/eval_only.jsonl`。
+
+```bash
+WANDB_MODE=online MS_ASSET_DIR=/home/skylar/@lab/hf-cache/maniskill \
+PYTHONPATH=SimplerEnv:ManiSkill:openvla \
+conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
+  --alg-name ppo --env-id PutOnPlateInScene25Main-v3 \
+  --vla-path /home/skylar/.cache/huggingface/hub/models--gen-robot--openvla-7b-rlvla-warmup/snapshots/735fd5d1f4472c4c9f3f998f0e89aa641af5ad03 \
+  --vla-load-path '' --seed 0 --num-envs 2 --episode-len 80 \
+  --eval-only --eval-episodes 6 --eval-obj-set test \
+  --name warmup-baseline-seed0-eval6
+```
+
 ## 已验证
 
 - `compileall`：通过。
@@ -64,10 +79,12 @@ SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
 - 有效的三 seed 四臂短跑（`NUM_ENVS=2`、每组总计 `8` steps、episode 长度 `4`）：seed `0` PPO `wandb/offline-run-20261112_010051-svov1bhf`、correct `...010332-wq43zphw`、shuffled `...010826-m1p8fsgh`、none `...011615-1kg76lau`；seed `1` PPO `...012321-xcbqtdaz`、correct `...012610-9yk3vaj8`、shuffled `...013200-gi6ffssq`、none `...013748-j9j0j8be`；seed `2` PPO `...014423-nsp9nu6w`、correct `...014840-7dnb67f4`、shuffled `...015334-fh78t97c`、none `...015914-xaspet2o`。独立评估 success 全为 `0`，仅验证运行闭环，不足以证明方法效果。
 - 上一条 `SEEDS=1` 四臂记录因 `NUM_ENVS=1` 使 shuffled 反馈退化为未错配对照，不能作为有效 shuffled 结果；保留其 W&B 历史，但以本节 `NUM_ENVS=2` 的三 seed 记录为准。
 - runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
+- Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`；至少 3/6 episode 抓持成功。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
+- 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
 
 ## 未完成门槛
 
-- pytest 未安装；测试文件存在但尚未由 pytest 执行。
+- `pytest` 未安装；5 个 SDPO primitive 测试函数已在 `rlvla_env` 中直接执行通过，需在有 pytest 的环境再跑测试框架。
 - 上述均为工程闭环 smoke，不是成功率结论；每组仅 1 个 rollout episode，正式比较仍需固定步数、多 seed 和独立评估 episode。
 - gripper-open 从 WidowX `left_finger` / `right_finger` 当前关节位置读取，平均位置 `>0.026 m` 判为 open；字段仍支持异常情况下显式 unknown。
 - 8-step 三 seed 对照每臂只有一个 rollout episode，尚需更长训练和更多独立评估 episode；不能据此下成功率结论。

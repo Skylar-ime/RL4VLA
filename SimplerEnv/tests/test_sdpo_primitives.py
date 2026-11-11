@@ -42,3 +42,20 @@ def test_reverse_kl_masks_tokens_and_only_student_gets_gradient():
     assert loss.item() > 0
     assert student.grad is not None
     assert teacher.grad is None
+
+
+def test_reverse_kl_is_zero_for_identical_distributions():
+    logits = torch.tensor([[[2.0, -1.0], [0.5, 0.5]]])
+    loss = reverse_kl_student_to_teacher(logits, logits.clone(), torch.ones((1, 2), dtype=torch.bool))
+    assert loss.item() < 1e-7
+
+
+def test_reverse_kl_rejects_misaligned_shapes():
+    student = torch.zeros((1, 2, 3))
+    teacher = torch.zeros((1, 1, 3))
+    try:
+        reverse_kl_student_to_teacher(student, teacher, torch.ones((1, 2), dtype=torch.bool))
+    except ValueError as error:
+        assert "identical aligned shapes" in str(error)
+    else:
+        raise AssertionError("misaligned student and teacher logits must be rejected")

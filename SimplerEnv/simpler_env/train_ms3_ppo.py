@@ -50,6 +50,9 @@ class Args:
     steps_vh: int = 0  # episodes
     interval_eval: int = 10
     interval_save: int = 40
+    eval_only: bool = False
+    eval_episodes: int = 6
+    eval_obj_set: str = "test"
 
     # buffer
     buffer_inferbatch: int = 32
@@ -220,11 +223,17 @@ class Runner:
         return path
 
     @torch.no_grad()
-    def eval(self, obj_set: str) -> dict:
+    def eval(self, obj_set: str, episode_offset: int = 0) -> dict:
         self.policy.prep_rollout()
         env_infos = defaultdict(lambda: [])
+        cpu_rng_state = torch.get_rng_state()
+        cuda_rng_states = torch.cuda.get_rng_state_all()
+        torch.manual_seed(self.args.seed + 100000 + episode_offset)
 
-        obs_img, instruction, info = self.env.reset(obj_set=obj_set)
+        episode_ids = torch.arange(
+            episode_offset, episode_offset + self.args.num_envs, device=self.env.env.unwrapped.device
+        )
+        obs_img, instruction, info = self.env.reset(obj_set=obj_set, episode_ids=episode_ids)
 
         for _ in range(self.args.episode_len):
             obs = dict(image=obs_img, task_description=instruction)
@@ -241,11 +250,34 @@ class Runner:
         # infos
         env_stats = {k: np.mean(v) for k, v in env_infos.items()}
         env_stats = env_stats.copy()
+        torch.set_rng_state(cpu_rng_state)
+        torch.cuda.set_rng_state_all(cuda_rng_states)
 
         print(pprint.pformat({k: round(v, 4) for k, v in env_stats.items()}))
         print(f"")
 
         return env_stats
+
+    def run_eval_only(self):
+        if self.args.eval_episodes <= 0 or self.args.eval_episodes % self.args.num_envs != 0:
+            raise ValueError("eval_episodes must be a positive multiple of num_envs")
+        if self.args.eval_obj_set not in {"train", "test"}:
+            raise ValueError("eval_obj_set must be 'train' or 'test'")
+
+        results_path = self.glob_dir / "eval_only.jsonl"
+        self.policy.prep_rollout()
+        with results_path.open("w", encoding="utf-8") as handle:
+            for batch_index in range(self.args.eval_episodes // self.args.num_envs):
+                episode_offset = batch_index * self.args.num_envs
+                stats = self.eval(self.args.eval_obj_set, episode_offset=episode_offset)
+                record = {
+                    "obj_set": self.args.eval_obj_set,
+                    "episode_ids": list(range(episode_offset, episode_offset + self.args.num_envs)),
+                    **stats,
+                }
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+                wandb.log({f"baseline/{key}": value for key, value in stats.items()}, step=batch_index)
+        print(f"Saved evaluation records: {results_path}")
 
     @torch.no_grad()
     def render(self, epoch: int, obj_set: str) -> dict:
@@ -413,7 +445,9 @@ def main():
     args = tyro.cli(Args)
     runner = Runner(args)
 
-    if args.only_render:
+    if args.eval_only:
+        runner.run_eval_only()
+    elif args.only_render:
         ll = [
             "PutOnPlateInScene25VisionImage-v1",
             "PutOnPlateInScene25VisionTexture03-v1",

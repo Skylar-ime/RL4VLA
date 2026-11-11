@@ -95,11 +95,18 @@ class SimlerWrapper:
 
         return action
 
-    def reset(self, obj_set: str, same_init: bool = False):
+    def reset(self, obj_set: str, same_init: bool = False, episode_ids=None):
         options = {}
         options["obj_set"] = obj_set
-        if same_init:
-            options["episode_id"] = torch.randint(1000000000, (1,)).expand(self.num_envs).to(self.env.device)  # [B]
+        if episode_ids is not None:
+            episode_ids = torch.as_tensor(episode_ids, dtype=torch.int64, device=self.env.unwrapped.device).reshape(-1)
+            if episode_ids.numel() != self.num_envs:
+                raise ValueError("episode_ids must contain one id per environment")
+            options["episode_id"] = episode_ids
+        elif same_init:
+            options["episode_id"] = torch.randint(1000000000, (1,)).expand(self.num_envs).to(
+                self.env.unwrapped.device
+            )  # [B]
 
         obs, info = self.env.reset(options=options)
         obs_image = obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8)
