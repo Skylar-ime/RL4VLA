@@ -234,6 +234,7 @@ class Runner:
             episode_offset, episode_offset + self.args.num_envs, device=self.env.env.unwrapped.device
         )
         obs_img, instruction, info = self.env.reset(obj_set=obj_set, episode_ids=episode_ids)
+        completed = torch.zeros(self.args.num_envs, dtype=torch.bool, device=self.device)
 
         for _ in range(self.args.episode_len):
             obs = dict(image=obs_img, task_description=instruction)
@@ -242,10 +243,20 @@ class Runner:
             obs_img, reward, done, env_info = self.env.step(action)
 
             # info
-            print({k: round(v.to(torch.float32).mean().tolist(), 4) for k, v in env_info.items() if k != "episode"})
+            print({k: round(v.to(torch.float32).mean().tolist(), 4) for k, v in env_info.items()
+                   if k not in {"episode", "episode_env_ids"}})
             if "episode" in env_info.keys():
-                for k, v in env_info["episode"].items():
-                    env_infos[f"{k}"] += v
+                for value_index, env_index in enumerate(env_info["episode_env_ids"]):
+                    if completed[env_index]:
+                        continue
+                    completed[env_index] = True
+                    for key, values in env_info["episode"].items():
+                        env_infos[key].append(values[value_index])
+                if completed.all():
+                    break
+
+        if not completed.all():
+            raise RuntimeError("evaluation ended before every requested episode completed")
 
         # infos
         env_stats = {k: np.mean(v) for k, v in env_infos.items()}
@@ -306,7 +317,8 @@ class Runner:
             obs_img_new, reward, done, env_info = self.env.step(action)
 
             # info
-            print({k: round(v.to(torch.float32).mean().tolist(), 4) for k, v in env_info.items() if k != "episode"})
+            print({k: round(v.to(torch.float32).mean().tolist(), 4) for k, v in env_info.items()
+                   if k not in {"episode", "episode_env_ids"}})
             if "episode" in env_info.keys():
                 for k, v in env_info["episode"].items():
                     env_infos[f"{k}"] += v
@@ -315,7 +327,8 @@ class Runner:
                 post_action = self.env._process_action(action)
                 log_image = obs_img[i].cpu().numpy()
                 log_action = post_action[i].cpu().numpy().tolist()
-                log_info = {k: v[i].tolist() for k, v in env_info.items() if k != "episode"}
+                log_info = {k: v[i].tolist() for k, v in env_info.items()
+                            if k not in {"episode", "episode_env_ids"}}
                 datas[i]["image"].append(log_image)
                 datas[i]["action"].append(log_action)
                 datas[i]["info"].append(log_info)

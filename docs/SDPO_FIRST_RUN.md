@@ -80,6 +80,7 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 上一条 `SEEDS=1` 四臂记录因 `NUM_ENVS=1` 使 shuffled 反馈退化为未错配对照，不能作为有效 shuffled 结果；保留其 W&B 历史，但以本节 `NUM_ENVS=2` 的三 seed 记录为准。
 - runner 与单次训练均启用 W&B。runner 默认 `WANDB_MODE=online`；当前环境在线认证返回 HTTP 403，故上述 run 通过 `WANDB_MODE=offline` 保存在本地 W&B 目录，网络/凭据恢复后可用 `wandb sync <run目录>` 上传。
 - Warm-up 固定测试集基线：6 个独立 episode（episode ID `0..5`，每批 2 个）success `0/6`、抓持 `4/6`。W&B run `wandb/offline-run-20261112_021531-fke1hpqs`；逐批指标在 `glob/eval_only.jsonl`。此为有限测试集基线，非统计显著结论。
+- 修正 episode 完成过滤后，seed `0` correct SDPO checkpoint 在同一 6-episode 测试集 success `2/6`、抓持 `4/6`；W&B run `wandb/offline-run-20261112_024330-ml6drwkc`。该结果仅为一个 checkpoint、一个 seed 的小样本信号，不能作为最终收益结论。
 - 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
 
 ## 未完成门槛

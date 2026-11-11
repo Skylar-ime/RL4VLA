@@ -5,6 +5,20 @@ from mani_skill.envs.sapien_env import BaseEnv
 from simpler_env.feedback import build_rel_spatial_feedback
 
 
+def completed_episode_info(info, done):
+    done_mask = done.reshape(-1).to(dtype=torch.bool)
+    done_ids = done_mask.nonzero(as_tuple=False).reshape(-1)
+    if done_ids.numel() == 0:
+        return info
+    info["episode_env_ids"] = done_ids.detach().cpu().tolist()
+    info["episode"] = {
+        key: value.reshape(-1)[done_mask].detach().cpu().tolist()
+        for key, value in info.items()
+        if key in {"is_src_obj_grasped", "consecutive_grasp", "success"}
+    }
+    return info
+
+
 class SimlerWrapper:
     def __init__(self, all_args, unnorm_state, extra_seed=0):
         self.args = all_args
@@ -180,10 +194,6 @@ class SimlerWrapper:
         reward = self.get_reward(info)
 
         # process episode info
-        if done.any():
-            info["episode"] = {}
-            for k in ["is_src_obj_grasped", "consecutive_grasp", "success"]:
-                v = [info[k][idx].item() for idx in range(self.num_envs)]
-                info["episode"][k] = v
+        completed_episode_info(info, done)
 
         return obs_image, reward, done, info

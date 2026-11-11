@@ -1,6 +1,7 @@
 import torch
 
 from simpler_env.feedback import build_rel_spatial_feedback
+from simpler_env.env.simpler_wrapper import completed_episode_info
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
 
 
@@ -59,3 +60,15 @@ def test_reverse_kl_rejects_misaligned_shapes():
         assert "identical aligned shapes" in str(error)
     else:
         raise AssertionError("misaligned student and teacher logits must be rejected")
+
+
+def test_completed_episode_metrics_include_only_done_environments():
+    info = {
+        "success": torch.tensor([0.0, 1.0, 0.0]),
+        "is_src_obj_grasped": torch.tensor([1.0, 1.0, 0.0]),
+        "consecutive_grasp": torch.tensor([0.5, 1.0, 0.0]),
+    }
+    completed_episode_info(info, torch.tensor([[False], [True], [True]]))
+    assert info["episode_env_ids"] == [1, 2]
+    assert info["episode"]["success"] == [1.0, 0.0]
+    assert info["episode"]["is_src_obj_grasped"] == [1.0, 0.0]
