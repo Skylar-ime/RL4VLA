@@ -344,6 +344,7 @@ class OpenVLAPolicy:
                 "teacher_regularization": "ema",
                 "ema_rate": float(self.args.sdpo_ema_rate),
                 "action_support": "OpenVLA discrete action bins 32000-256:32000",
+                "token_alignment": "raw rollout action IDs appended after tokenized prefix",
                 "feedback_mode": self.args.sdpo_feedback_mode,
                 "feedback_source": "decision-time privileged RelSpatial state",
                 "ppo_policy_loss": False,
