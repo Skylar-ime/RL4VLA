@@ -1,5 +1,6 @@
 import json
 import copy
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -523,6 +524,7 @@ class OpenVLAPPO:
         return final_info
 
     def train_sdpo_step(self, idx, total, batch):
+        step_time = time.perf_counter()
         obs_image, instruct, actions, _value_preds, _returns, _masks, _old_logprob, _advantages, feedback = batch
         obs = dict(image=torch.tensor(obs_image).to(self.tpdv["device"]), task_description=instruct)
         actions = torch.tensor(actions, device=self.tpdv["device"], dtype=torch.long)
@@ -536,19 +538,28 @@ class OpenVLAPPO:
             raise ValueError(f"Unknown sdpo_feedback_mode: {mode}")
 
         student_logits = self.policy.evaluate_action_logits(obs, actions)
+        student_seconds = time.perf_counter() - step_time
+        teacher_time = time.perf_counter()
         teacher_logits = self.policy.evaluate_teacher_action_logits(obs, actions, feedback=feedback_text)
+        teacher_seconds = time.perf_counter() - teacher_time
         valid_mask = torch.ones(student_logits.shape[:-1], dtype=torch.bool, device=student_logits.device)
         loss = reverse_kl_student_to_teacher(student_logits, teacher_logits, valid_mask)
         (loss / self.args.alg_gradient_accum).backward()
 
         grad_norm = None
+        update_seconds = 0.0
         if idx % self.args.alg_gradient_accum == self.args.alg_gradient_accum - 1 or idx == total - 1:
+            update_time = time.perf_counter()
             grad_norm = nn.utils.clip_grad_norm_(self.policy.params_vla, self.ppo_grad_norm)
             self.policy.vla_optimizer.step()
             self.policy.vla_optimizer.zero_grad()
             self.policy.update_teacher_ema(self.args.sdpo_ema_rate)
+            update_seconds = time.perf_counter() - update_time
         return {"loss": loss.item(), "valid_tokens": float(valid_mask.sum().item()),
                 "teacher_student_kl": loss.item(),
+                "time/student_forward_seconds": student_seconds,
+                "time/teacher_forward_seconds": teacher_seconds,
+                "time/update_seconds": update_seconds,
                 **({"grad_norm": grad_norm.item()} if grad_norm is not None else {})}
 
     def train_sdpo(self, buffer):

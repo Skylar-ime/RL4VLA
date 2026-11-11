@@ -92,6 +92,8 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 同协议 seed `0` PPO checkpoint 测试 success `2/6`、抓持 `6/6`；W&B run `wandb/offline-run-20261112_025659-skfiyjg2`。PPO 与 correct SDPO 均为 success `2/6`；短跑未显示 SDPO 相对 PPO 收益。
 - 同协议 seed `0` shuffled SDPO checkpoint 测试 success `2/6`、抓持 `5/6`；W&B run `wandb/offline-run-20261112_030731-hhom6kc2`。该小样本结果与 correct SDPO 相同，不能证明反馈顺序带来收益。
 - 训练期评估现固定 episode ID，并用独立种子采样动作，随后恢复训练 RNG，避免训练过程消耗不同随机数导致各组评估不一致。
+- 训练 W&B 指标现包含 `time/rollout_seconds`、`time/update_seconds`、`time/eval_*_seconds`、`feedback/effective_ratio`；SDPO 更新另记录 `time/student_forward_seconds`、`time/teacher_forward_seconds`、`time/update_seconds`，用于拆分环境采样、教师评分和参数更新成本。
+- 新指标 GPU smoke 已完成：W&B run `wandb/offline-run-20261112_034227-fq3j7953`，完成 8 environment steps、反馈归档、SDPO 更新、EMA、checkpoint 和 ID/OOD 评估；对应 checkpoint 位于该 run 的 `glob/steps_0000`。
 
 ## 未完成门槛
 

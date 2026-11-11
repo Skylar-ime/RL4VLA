@@ -392,6 +392,7 @@ class Runner:
         for episode in range(max_episodes):
             env_infos = defaultdict(lambda: [])
             ep_time = time.time()
+            rollout_time = time.time()
 
             obs_img, instruction, info = self.env.reset(obj_set="train", same_init=self.args.use_same_init)
             self.buffer.warmup(obs_img.cpu().numpy(), instruction)
@@ -414,6 +415,13 @@ class Runner:
             print(pprint.pformat({k: round(np.mean(v), 4) for k, v in env_infos.items()}))
             feedback_path = self.save_feedback_archive(episode)
             print(f"Saved feedback archive: {feedback_path}")
+            rollout_seconds = time.time() - rollout_time
+            feedback_count = sum(
+                record is not None
+                for step_records in self.buffer.feedback
+                for record in step_records
+            )
+            feedback_total = self.args.episode_len * self.args.num_envs
 
             # train and process infos
             self.compute_endup()
@@ -422,9 +430,15 @@ class Runner:
             torch.cuda.empty_cache()
 
             # train
+            update_time = time.time()
             infos = self.train()
+            update_seconds = time.time() - update_time
             for k, v in env_infos.items():
                 infos[f"env/{k}"] = np.mean(v)
+            infos["time/rollout_seconds"] = rollout_seconds
+            infos["time/update_seconds"] = update_seconds
+            infos["time/episode_seconds"] = time.time() - ep_time
+            infos["feedback/effective_ratio"] = feedback_count / max(feedback_total, 1)
 
             # log
             wandb.log(infos, step=steps)
@@ -436,12 +450,16 @@ class Runner:
             # eval
             if episode % self.args.interval_eval == self.args.interval_eval - 1 or episode == max_episodes - 1:
                 print(f"Evaluating at {steps}")
+                eval_time = time.time()
                 sval_stats = self.eval(obj_set="train")
                 sval_stats = {f"eval/{k}": v for k, v in sval_stats.items()}
+                sval_stats["time/eval_train_seconds"] = time.time() - eval_time
                 wandb.log(sval_stats, step=steps)
 
+                eval_time = time.time()
                 sval_stats = self.eval(obj_set="test")
                 sval_stats = {f"eval/{k}_ood": v for k, v in sval_stats.items()}
+                sval_stats["time/eval_test_seconds"] = time.time() - eval_time
                 wandb.log(sval_stats, step=steps)
 
             # save
