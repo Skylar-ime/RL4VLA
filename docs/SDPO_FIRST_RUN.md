@@ -50,6 +50,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 真实 GPU smoke：通过。`PutOnPlateInScene25Main-v3` 单环境单步完成 rollout、反馈归档、SDPO 更新、EMA、评估和 checkpoint 保存；WandB 本地 run 为 `wandb/offline-run-20261111_231030-gouf9xje`，训练 loss `4.898`、有效 token `7`。
 - checkpoint 恢复 smoke：通过。以 `glob/steps_0000` 重载时日志确认 `SDPO teacher load: restored EMA state` 与 optimizer 恢复。
 - 首轮控制 smoke：PPO run `wandb/offline-run-20261111_232751-rkm0bfjf`，loss `0.0005`；正确反馈 SDPO 如上；两环境 shuffled run `wandb/offline-run-20261111_233517-3j4mumpi`，loss `4.0515`；无反馈 SDPO run `wandb/offline-run-20261111_234118-699ie136`，loss `0.0`。shuffled 使用 `num-envs=2`，确认发生跨环境错配。
+- 8 步短程对照：correct SDPO run `wandb/offline-run-20261111_234727-xpt1cfj5`，两次更新 loss `5.0716 -> 4.0652`；同预算 PPO run `wandb/offline-run-20261111_235243-6p5nhm1d`，两次更新 loss `6.4629 -> 0.8897`。两组独立评估成功率均为 `0`，不能据此宣称收益。
 
 ## 未完成门槛
 
