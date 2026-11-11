@@ -115,10 +115,18 @@ class SimlerWrapper:
         task = self.env.unwrapped
         extra = getattr(task, "extra_stats", {})
         episode_stats = getattr(task, "episode_stats", {})
-        source_name = getattr(task, "source_obj_name", None)
-        target_name = getattr(task, "target_obj_name", None)
-        source_names = source_name if isinstance(source_name, (list, tuple)) else [source_name] * self.num_envs
-        target_names = target_name if isinstance(target_name, (list, tuple)) else [target_name] * self.num_envs
+        def selected_names(ids_key, names_key, database_key, fallback_key):
+            ids = getattr(task, ids_key, None)
+            names = getattr(task, names_key, None)
+            database = getattr(task, database_key, None)
+            if ids is not None and names is not None and database is not None:
+                ids = ids.detach().cpu().tolist() if hasattr(ids, "detach") else list(ids)
+                return [database[names[int(index)]]["name"] for index in ids]
+            fallback = getattr(task, fallback_key, None)
+            return fallback if isinstance(fallback, (list, tuple)) else [fallback] * self.num_envs
+
+        source_names = selected_names("select_carrot_ids", "carrot_names", "model_db_carrot", "source_obj_name")
+        target_names = selected_names("select_plate_ids", "plate_names", "model_db_plate", "target_obj_name")
 
         def at(values, index):
             if values is None:
