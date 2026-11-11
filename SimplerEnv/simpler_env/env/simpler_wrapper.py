@@ -30,7 +30,7 @@ class SimlerWrapper:
         self.env.reset(seed=[self.args.seed * 1000 + i + extra_seed for i in range(self.args.num_envs)])
 
         # variables
-        self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32)  # [B, 1]
+        self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32, device=self.env.device)
         self.episode_ids = [None] * self.num_envs
         self.decision_index = [0] * self.num_envs
 
@@ -46,6 +46,8 @@ class SimlerWrapper:
         reward += (info["success"].reshape(-1, 1) & info["is_src_obj_grasped"].reshape(-1, 1)) * 1.0
 
         # diff
+        if self.reward_old.device != reward.device:
+            self.reward_old = self.reward_old.to(reward.device)
         reward_diff = reward - self.reward_old
         self.reward_old = reward
 
@@ -163,18 +165,18 @@ class SimlerWrapper:
     def step(self, raw_action):
         action = self._process_action(raw_action)
 
-        obs, _reward, _terminated, truncated, info = self.env.step(action)
+        obs, _reward, terminated, truncated, info = self.env.step(action)
         obs_image = obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8)
-        truncated = truncated.reshape(-1, 1)  # [B, 1]
+        done = torch.logical_or(terminated, truncated).reshape(-1, 1)  # [B, 1]
 
         # calculate reward
         reward = self.get_reward(info)
 
         # process episode info
-        if truncated.any():
+        if done.any():
             info["episode"] = {}
             for k in ["is_src_obj_grasped", "consecutive_grasp", "success"]:
                 v = [info[k][idx].item() for idx in range(self.num_envs)]
                 info["episode"][k] = v
 
-        return obs_image, reward, truncated, info
+        return obs_image, reward, done, info
