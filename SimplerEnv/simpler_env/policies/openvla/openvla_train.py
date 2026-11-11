@@ -293,6 +293,21 @@ class OpenVLAPolicy:
         torch.save(training_state, path / "training_state.pt")
 
         json.dump(self.vla.base_model.norm_stats, open(path / "dataset_statistics.json", "w"))
+        if self.teacher_vla is not None:
+            protocol = {
+                "algorithm": "sdpo",
+                "direction": "student_to_teacher",
+                "divergence": "reverse_kl",
+                "teacher_gradient": "stopped",
+                "teacher_regularization": "ema",
+                "ema_rate": float(self.args.sdpo_ema_rate),
+                "action_support": "OpenVLA discrete action bins 32000-256:32000",
+                "feedback_mode": self.args.sdpo_feedback_mode,
+                "feedback_source": "decision-time privileged RelSpatial state",
+                "ppo_policy_loss": False,
+                "advantage_weighting": False,
+            }
+            json.dump(protocol, open(path / "sdpo_protocol.json", "w"), indent=2, sort_keys=True)
 
     def load(self, path: Path):
         del self.vla
