@@ -15,8 +15,8 @@ def test_rel_spatial_feedback_uses_current_positions_and_explicit_unknowns():
         gripper_position=[0.0, 0.0, 0.1],
         source_grasped=True,
     )
-    assert record.source_to_target == (0.2, 0.0, 0.0)
-    assert "carrot is right of plate" in record.text
+    assert record.source_to_target == (-0.2, 0.0, 0.0)
+    assert "carrot is left of plate" in record.text
     assert "unknown state" in record.text
 
 

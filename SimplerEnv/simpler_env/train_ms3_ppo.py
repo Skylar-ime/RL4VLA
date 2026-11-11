@@ -44,6 +44,7 @@ class Args:
     num_envs: int = 64
     episode_len: int = 80
     use_same_init: bool = False
+    sim_backend: str = "gpu"
 
     steps_max: int = 2000000
     steps_vh: int = 0  # episodes

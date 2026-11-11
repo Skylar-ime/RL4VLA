@@ -18,7 +18,7 @@ class SimlerWrapper:
             num_envs=self.args.num_envs,
             obs_mode="rgb+segmentation",
             control_mode=robot_control_mode,
-            sim_backend="gpu",
+            sim_backend=getattr(self.args, "sim_backend", "gpu"),
             sim_config={
                 "sim_freq": 500,
                 "control_freq": 5,

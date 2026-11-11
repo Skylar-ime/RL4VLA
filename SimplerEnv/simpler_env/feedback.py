@@ -75,9 +75,9 @@ def build_rel_spatial_feedback(*, episode_id: int | str | None, decision_index: 
                                deadband_m: float = 0.01) -> RelSpatialRecord:
     """Build teacher feedback from current state; missing fields remain unknown."""
     source, target, gripper = _vec(source_position), _vec(target_position), _vec(gripper_position)
-    source_to_gripper = None if source is None or gripper is None else tuple(gripper[i] - source[i] for i in range(3))
-    target_to_gripper = None if target is None or gripper is None else tuple(gripper[i] - target[i] for i in range(3))
-    source_to_target = None if source is None or target is None else tuple(target[i] - source[i] for i in range(3))
+    source_to_gripper = None if source is None or gripper is None else tuple(source[i] - gripper[i] for i in range(3))
+    target_to_gripper = None if target is None or gripper is None else tuple(target[i] - gripper[i] for i in range(3))
+    source_to_target = None if source is None or target is None else tuple(source[i] - target[i] for i in range(3))
     source_label, target_label = source_name or "source object", target_name or "target container"
     grasped, opened = _bool(source_grasped), _bool(gripper_open)
     text = " ".join((
