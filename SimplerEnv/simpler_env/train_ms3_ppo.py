@@ -400,7 +400,7 @@ class Runner:
 
             for _ in tqdm(range(self.args.episode_len), desc="rollout"):
                 value, action, logprob = self.collect()
-                feedback = self.env.capture_feedback()
+                feedback = self.env.capture_feedback() if self.args.alg_name == "sdpo" else None
                 obs_img, reward, done, env_info = self.env.step(action)
 
                 data = (obs_img, action, logprob, value, reward, done, feedback)
@@ -414,8 +414,9 @@ class Runner:
             # steps
             steps = (episode + 1) * self.args.episode_len * self.args.num_envs
             print(pprint.pformat({k: round(np.mean(v), 4) for k, v in env_infos.items()}))
-            feedback_path = self.save_feedback_archive(episode)
-            print(f"Saved feedback archive: {feedback_path}")
+            if self.args.alg_name == "sdpo":
+                feedback_path = self.save_feedback_archive(episode)
+                print(f"Saved feedback archive: {feedback_path}")
             rollout_seconds = time.time() - rollout_time
             feedback_count = sum(
                 record is not None
@@ -425,7 +426,8 @@ class Runner:
             feedback_total = self.args.episode_len * self.args.num_envs
 
             # train and process infos
-            self.compute_endup()
+            if self.args.alg_name != "sdpo":
+                self.compute_endup()
             del value, action, logprob, obs_img, reward, done
             gc.collect()
             torch.cuda.empty_cache()
