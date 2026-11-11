@@ -48,6 +48,14 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 批量 runner 默认关闭视频保存（`SAVE_RENDER=false`），避免每个 7B checkpoint 生成多 GB 视频；需要视频时显式设置 `SAVE_RENDER=true`。
 
+下一阶段 pilot 候选（**待预算确认，尚未执行**）：`EPISODE_LEN=80`、`NUM_ENVS=2`、每组 `STEPS_MAX=480`，即每组 3 轮、共 12 组。`INTERVAL_EVAL=1` 在每轮训练后评估固定的 train/test episode ID `0,1`，生成 160/320/480 步三个工程学习曲线点；`INTERVAL_SAVE=40` 只保存终点，避免三倍 checkpoint 占用。当前空闲磁盘约 `42 GiB`，单个 PPO/SDPO checkpoint 约 `0.9/1.1 GiB`，12 个终点 checkpoint 约需 `12 GiB`，还须预留日志与环境缓存。最终独立评估 episode 数量和正式长跑预算需另定；W&B 在线仍返回 HTTP 403，运行时先用离线模式。
+
+```bash
+SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=480 \
+INTERVAL_EVAL=1 INTERVAL_SAVE=40 SAVE_RENDER=false WANDB_MODE=offline \
+  bash SimplerEnv/scripts/run_sdpo_comparison.sh
+```
+
 ```bash
 SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=4000 WANDB_MODE=online \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh
