@@ -56,6 +56,8 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 本机已有 480 步三 seed 矩阵运行中；必须先核对完成的 run，不得再用远端 `matrix` 重复消耗同一预算。远端 Slurm 日志保存在仓库外的 `/public/home/s2250018/project/rlvla-sdpo-<job-id>.out`；`experiments/` 为 Git 忽略的运行产物。robot 无法直连 Hugging Face，模型按固定 revision 从 `https://hf-mirror.com` 下载，完整下载后逐分片与本机 warm-up snapshot 的 SHA-256 校验一致再做 smoke。
 
+仓库迁移到 `project/RL4VLA` 后，robot 的 editable 包须从新路径重装：`python -m pip install --no-deps -e ManiSkill -e SimplerEnv -e openvla`。环境使用 `tensorflow-metadata==1.17.0`、`protobuf==4.21.12`；较新的 metadata 与 protobuf 4.25.9 组合在导入时缺少 `google.protobuf.runtime_version`。在 `PYTHONNOUSERSITE=1` 下已核对 `mani_skill`、`simpler_env`、`prismatic` 均从新仓库路径导入。
+
 在 `ssh robot` 登录节点执行，smoke 完成并核验后再投递矩阵：
 
 ```bash
