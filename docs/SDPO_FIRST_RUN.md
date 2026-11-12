@@ -175,4 +175,12 @@ WANDB_MODE=online bash SimplerEnv/scripts/run_eval_matrix.sh
 
 - 在上述四个 seed 0 / 160-step checkpoint 与 warm-up 上，按相同 `PutOnPlateInScene25Main-v3` test episode `0..5`、冻结策略重新评估；结果仍是 warm-up `0/6`、PPO `1/6`、correct SDPO `4/6`、shuffled SDPO `1/6`、none SDPO `2/6`。W&B API 核实五个 run 均为 `finished`，且每个云端 run 都有 `eval_only.jsonl`（921 B）：warm-up `bknc4sip`、PPO `0lgozlos`、correct `tfkgli85`、shuffled `g8qvuqqy`、none `ie45uvxx`。
 - 这是同一训练 seed、每组 6 个固定测试 episode 的探索性结果；当前不能判定反馈带来的因果改进。pytest 模块缺失（`python -m pytest` 报 `No module named pytest`），但测试文件中的 12 个 `test_*` 函数已在 `rlvla_env` 中直接执行并全部通过。
-- 后续三 seed、每组 480 environment steps 的对照矩阵尚未运行。按计划先等待训练预算确认；不据此启动长时间训练。
+- 后续三 seed、每组 480 environment steps 的对照矩阵已在用户确认预算后运行；结果见下节。此处 160-step pilot 不作为正式结论。
+
+## 2026-11-12 三 seed、480 环境步正式对照
+
+- 用户确认四个训练组（PPO、正确 RelSpatial SDPO、打乱反馈 SDPO、无反馈 SDPO）各用 seed `0,1,2`、`480` environment steps；`NUM_ENVS=2`、`EPISODE_LEN=80`，即每个训练 run 六个环境回合。12 个训练 checkpoint 均保存于各自 `wandb/*run-*/glob/steps_0002`，配置可由 `SimplerEnv/scripts/build_sdpo_final_eval_manifest.py` 验证。后续没有追加训练。
+- 独立冻结策略评测：warm-up 加 12 个 checkpoint，共 13 组；固定 `PutOnPlateInScene25Main-v3`、test、评估 seed `0`、episode ID `0..5`、`NUM_ENVS=2`、`EPISODE_LEN=80`，每组三批共六集。已逐 run 校验配置、六个 episode ID、三条 `eval_only.jsonl` 记录，合计 `78/78` 集完成；评测不更新参数。
+- 成功集数：warm-up `0/6`。PPO seed `0,1,2` 均为 `1/6`，合计 `3/18`；正确 RelSpatial SDPO 为 `1/6,0/6,1/6`，合计 `2/18`；打乱反馈 SDPO 为 `0/6,1/6,2/6`，合计 `3/18`；无反馈 SDPO 均为 `1/6`，合计 `3/18`。当前没有证据支持正确 RelSpatial 反馈优于 PPO 或控制组；六集/seed 的估计仍不精确，不能据此证明反馈必然无效。
+- 评测 W&B run ID：warm-up `ae4scnym`；PPO seed `0,1,2` 为 `qan74aje,92da1zmd,whqx9ctb`；正确 SDPO 为 `srfduj8y,cse1hvs8,zgq9xsrh`；打乱 SDPO 为 `xkfzdm1i,bz7ibyhd,gu5cofrk`；无反馈 SDPO 为 `xa1iuvik,h8vo1j4i,6w338ism`。本轮评测因 `api.wandb.ai` 返回 HTTP 403 使用本地 W&B offline run；上述 ID 不应误称已在云端可见，待网络恢复后需逐 run 同步并通过 API 核验。早期在线训练 run 与后期离线训练 run 同样不可混称。
+- robot 单卡 H800 机制 smoke 作业 `16552` 以 `COMPLETED 0:0` 结束，完成采样、蒸馏更新、checkpoint 恢复和两集 test 评估；`/tmp/rlvla-smoke-16552` 已清理。正式 78 集评测在本机 4090 完成；没有并行占用 robot GPU。新 v1 动作建议反馈仅有方案，未改代码或训练，须与本节旧版 RelSpatial 结果分开报告。
