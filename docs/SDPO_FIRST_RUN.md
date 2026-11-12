@@ -139,3 +139,4 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - Success / grasp：warm-up `0/6` / `4/6`；PPO `1/6` / `4/6`；correct SDPO `4/6` / `6/6`；shuffled SDPO `1/6` / `5/6`；none SDPO `2/6` / `6/6`。单 seed、六个 episode 只是探索性差异，不能推断泛化或反馈因果收益；尤其 none 与 correct 同样抓持 `6/6`，还需至少三训练种子和更多独立测试 episode。
 - W&B 全部已核实 `finished`，实体 `wqx349349-tongji-university`、项目 `RLVLA`：warm-up `fke1hpqs`；PPO `09n7h64z`；correct `d2drnr18`；shuffled `bqku833v`；none `7fqyjjfl`。每个 run 的 `glob/eval_only.jsonl` 保留每批的 episode IDs 和指标。
 - 发现 eval-only 旧逻辑的 W&B summary 只保留最后一批指标。现新增 `baseline/overall_*` 六集均值；并依据已归档 JSONL 回填上述五个 run 的云端 summary。验证代码通过 `py_compile`。之后运行 eval-only 会同时记录批次曲线和全评估集均值。
+- 同一问题也存在训练期：旧训练循环每次只评估一个并行 batch，未使用 `eval_episodes=6`。`eval_over_episodes` 现按配置评估并聚合固定 episode；`NUM_ENVS=2` 时每次 train/test checkpoint 评估各 6 集，`NUM_ENVS>=6` 时至少评估一个完整并行 batch。新增 mock 测试验证分批 episode IDs 和均值，不启动 GPU。

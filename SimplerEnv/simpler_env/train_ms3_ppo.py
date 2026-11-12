@@ -270,6 +270,22 @@ class Runner:
 
         return env_stats
 
+    @torch.no_grad()
+    def eval_over_episodes(self, obj_set: str) -> dict:
+        batch_count = max(
+            1,
+            (self.args.eval_episodes + self.args.num_envs - 1) // self.args.num_envs,
+        )
+        batch_stats = defaultdict(list)
+        for batch_index in range(batch_count):
+            stats = self.eval(
+                obj_set=obj_set,
+                episode_offset=batch_index * self.args.num_envs,
+            )
+            for key, value in stats.items():
+                batch_stats[key].append(value)
+        return {key: float(np.mean(values)) for key, values in batch_stats.items()}
+
     def run_eval_only(self):
         if self.args.eval_episodes <= 0 or self.args.eval_episodes % self.args.num_envs != 0:
             raise ValueError("eval_episodes must be a positive multiple of num_envs")
@@ -471,13 +487,13 @@ class Runner:
             if episode % self.args.interval_eval == self.args.interval_eval - 1 or episode == max_episodes - 1:
                 print(f"Evaluating at {steps}")
                 eval_time = time.time()
-                sval_stats = self.eval(obj_set="train")
+                sval_stats = self.eval_over_episodes(obj_set="train")
                 sval_stats = {f"eval/{k}": v for k, v in sval_stats.items()}
                 sval_stats["time/eval_train_seconds"] = time.time() - eval_time
                 wandb.log(sval_stats, step=steps)
 
                 eval_time = time.time()
-                sval_stats = self.eval(obj_set="test")
+                sval_stats = self.eval_over_episodes(obj_set="test")
                 sval_stats = {f"eval/{k}_ood": v for k, v in sval_stats.items()}
                 sval_stats["time/eval_test_seconds"] = time.time() - eval_time
                 wandb.log(sval_stats, step=steps)

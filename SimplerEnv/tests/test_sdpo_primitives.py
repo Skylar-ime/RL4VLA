@@ -7,6 +7,7 @@ from simpler_env.feedback import build_rel_spatial_feedback
 from simpler_env.env.simpler_wrapper import completed_episode_info
 from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
+from simpler_env.train_ms3_ppo import Runner
 from simpler_env.utils.replay_buffer import SeparatedReplayBuffer
 
 
@@ -100,6 +101,22 @@ def test_completed_episode_metrics_include_only_done_environments():
     assert info["episode_env_ids"] == [1, 2]
     assert info["episode"]["success"] == [1.0, 0.0]
     assert info["episode"]["is_src_obj_grasped"] == [1.0, 0.0]
+
+
+def test_training_evaluation_aggregates_all_requested_episode_batches():
+    runner = object.__new__(Runner)
+    runner.args = SimpleNamespace(eval_episodes=6, num_envs=2)
+    calls = []
+
+    def fake_eval(obj_set, episode_offset=0):
+        calls.append((obj_set, episode_offset))
+        return {"success": episode_offset / 2}
+
+    runner.eval = fake_eval
+    stats = runner.eval_over_episodes("test")
+
+    assert calls == [("test", 0), ("test", 2), ("test", 4)]
+    assert stats == {"success": 1.0}
 
 
 def test_action_token_append_preserves_raw_ids():
