@@ -50,11 +50,13 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 批量 runner 默认关闭视频保存（`SAVE_RENDER=false`），避免每个 7B checkpoint 生成多 GB 视频；需要视频时显式设置 `SAVE_RENDER=true`。
 
-已完成 seed 0、每组 160 环境步的一轮延长 pilot（详见下文）。下一阶段候选（**多 seed 预算仍待确认，尚未执行**）：`EPISODE_LEN=80`、`NUM_ENVS=2`、每组 `STEPS_MAX=480`，即每组 3 轮、共 12 组。`INTERVAL_EVAL=1` 在每轮训练后评估固定的 train/test episode ID `0,1`，生成 160/320/480 步三个工程学习曲线点；`INTERVAL_SAVE=40` 只保存终点，避免三倍 checkpoint 占用。此前空闲磁盘约 `42 GiB`，单个 PPO/SDPO checkpoint 约 `0.9/1.1 GiB`，12 个终点 checkpoint 约需 `12 GiB`，还须预留日志与环境缓存。最终独立评估 episode 数量和正式长跑预算需另定。W&B 官方云端认证及在线写入现已验证，正常使用 `WANDB_MODE=online`，失败时才切换离线。
+已完成 seed 0、每组 160 环境步的一轮延长 pilot（详见下文）。用户已确认下一轮预算：四个训练组各跑 seeds `0,1,2`、每组 `STEPS_MAX=480`、共 12 个训练 run；固定 `EPISODE_LEN=80`、`NUM_ENVS=2`，即每个 run 三轮、每轮 160 环境步。`INTERVAL_EVAL=1` 在 160/320/480 步评估固定 train/test episode `0,1`，作工程学习曲线；最终每个训练 seed checkpoint 独立评估 6 个固定 test episodes，warm-up 评估同一 6 集，共 78 个最终评估 episode。`INTERVAL_SAVE=40` 只保存终点；12 个 checkpoint 预计约 `12 GiB`，训练与评估均关闭视频。
+
+远端方案：`ssh robot` 是登录节点，GPU 通过 `/opt/gridview/slurm/bin/sbatch` 投递至 `h800` 分区，每项任务申请 1 张 H800，训练任务并发上限 2。代码固定在 `ex/1111` commit；远端按 Python 3.10、PyTorch `2.2.0+cu121` 安装依赖，下载固定 warm-up revision 与 ManiSkill 资源。远端尚无 W&B 登录凭据，故 run 先用 `WANDB_MODE=offline` 保留完整数据，再复制回本机用已验证凭据同步至官方 W&B 项目。先完成 H800 上一个短 smoke 和 checkpoint 恢复，再启动 12 个正式训练任务。
 
 ```bash
 SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=480 \
-INTERVAL_EVAL=1 INTERVAL_SAVE=40 SAVE_RENDER=false WANDB_MODE=online \
+INTERVAL_EVAL=1 EVAL_EPISODES=2 INTERVAL_SAVE=40 SAVE_RENDER=false WANDB_MODE=offline \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh
 ```
 

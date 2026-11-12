@@ -12,14 +12,19 @@ cd "$(dirname "$0")/../.."
 : "${NUM_ENVS:=2}"
 : "${INTERVAL_EVAL:=10}"
 : "${INTERVAL_SAVE:=40}"
+: "${EVAL_EPISODES:=6}"
 : "${WANDB_MODE:=online}"
 : "${SAVE_RENDER:=false}"
 
 export MS_ASSET_DIR WANDB_MODE
 export PYTHONPATH="SimplerEnv:ManiSkill:openvla${PYTHONPATH:+:${PYTHONPATH}}"
 
-if (( NUM_ENVS < 2 || EPISODE_LEN < 1 || STEPS_MAX < 1 || INTERVAL_EVAL < 1 || INTERVAL_SAVE < 1 )); then
-    echo "NUM_ENVS must be at least 2; episode length, steps, and intervals must be positive" >&2
+if (( NUM_ENVS < 2 || EPISODE_LEN < 1 || STEPS_MAX < 1 || INTERVAL_EVAL < 1 || INTERVAL_SAVE < 1 || EVAL_EPISODES < 1 )); then
+    echo "NUM_ENVS must be at least 2; episode length, steps, intervals, and eval episodes must be positive" >&2
+    exit 2
+fi
+if (( EVAL_EPISODES % NUM_ENVS != 0 )); then
+    echo "EVAL_EPISODES must be divisible by NUM_ENVS" >&2
     exit 2
 fi
 if (( STEPS_MAX % (EPISODE_LEN * NUM_ENVS) != 0 )); then
@@ -51,6 +56,7 @@ run_arm() {
         --steps-max "$STEPS_MAX" \
         --interval-eval "$INTERVAL_EVAL" \
         --interval-save "$INTERVAL_SAVE" \
+        --eval-episodes "$EVAL_EPISODES" \
         --buffer-minibatch 2 \
         --alg-gradient-accum 1 \
         --alg-ppo-epoch 1 \
