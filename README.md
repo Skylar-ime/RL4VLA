@@ -8,6 +8,8 @@ This branch adds an opt-in `--sdpo-feedback-version relspatial-action-v1`. After
 
 Confirmed v1 budget: `PutOnPlateInScene25Main-v3`, four arms (PPO, old RelSpatial SDPO, v1 correct SDPO, v1 shuffled SDPO), training seeds `0,1`, `2400` environment steps each, training `NUM_ENVS=2`, `EPISODE_LEN=80`. Save checkpoints at 800, 1600 and 2400 steps; evaluate each frozen checkpoint on the same 30 test episode IDs `0..29`, using six parallel environments for throughput. The two SDPO feedback versions use the same EMA reverse-KL mechanism and warm-up initialization. At most two GPUs are used at once; prefer one robot H800 for training and one local 4090 for evaluation. Training runs use W&B; offline runs must be synced and verified before claiming cloud availability.
 
+Evaluation keeps the upstream sampled-action setting (`vla_temperature_eval=0.6`) and fixed evaluation seed `0`. The six-environment v1 evaluation is internally consistent across arms but must not be treated as numerically identical to the earlier two-environment, six-episode evaluation. The v1 warm-up baseline is `14/30` successful test episodes; this is a reference for the new evaluation protocol, not evidence that a trained arm improved.
+
 ```bash
 SEEDS='0 1' RUN_ROOT=experiments/sdpo-v1 bash SimplerEnv/scripts/run_sdpo_v1_comparison.sh
 python SimplerEnv/scripts/build_sdpo_v1_eval_manifest.py --run-root experiments/sdpo-v1 > experiments/sdpo-v1/eval_manifest.tsv
