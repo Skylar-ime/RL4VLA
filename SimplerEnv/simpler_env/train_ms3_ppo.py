@@ -331,6 +331,7 @@ class Runner:
             for key, values in batch_stats.items()
         }
         wandb.log(overall_stats, step=len(batch_stats["success"]))
+        wandb.save(str(results_path), base_path=str(self.save_dir), policy="now")
         print(f"Saved evaluation records: {results_path}")
 
     @torch.no_grad()

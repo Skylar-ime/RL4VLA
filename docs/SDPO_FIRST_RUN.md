@@ -140,3 +140,4 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - W&B 全部已核实 `finished`，实体 `wqx349349-tongji-university`、项目 `RLVLA`：warm-up `fke1hpqs`；PPO `09n7h64z`；correct `d2drnr18`；shuffled `bqku833v`；none `7fqyjjfl`。原始本地 `glob/eval_only.jsonl` 保留每批统计；新评估 run 还在 W&B 文件中附每集指标，便于按 episode ID 配对分析。
 - 发现 eval-only 旧逻辑的 W&B summary 只保留最后一批指标。现新增 `baseline/overall_*` 六集均值；并依据已归档 JSONL 回填上述五个 run 的云端 summary。验证代码通过 `py_compile`。之后运行 eval-only 会同时记录批次曲线和全评估集均值。
 - 同一问题也存在训练期：旧训练循环每次只评估一个并行 batch，未使用 `eval_episodes=6`。`eval_over_episodes` 现按配置评估并聚合固定 episode；`NUM_ENVS=2` 时每次 train/test checkpoint 评估各 6 集，`NUM_ENVS>=6` 时至少评估一个完整并行 batch。新增 mock 测试验证分批 episode IDs 和均值，不启动 GPU。
+- W&B SDK 不会自动上传 run 目录中新写入的 JSONL，故 eval-only 现显式 `wandb.save(..., policy="now")`。在线 2-episode artifact smoke run `7b45gele` 已由 API 核验 `finished`，云端 `eval_only.jsonl` 大小 `307 B`，summary 含总体均值；完整六集归档已落本地，逐集上传路径由该 smoke 验证。
