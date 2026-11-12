@@ -278,10 +278,13 @@ class Runner:
 
         results_path = self.glob_dir / "eval_only.jsonl"
         self.policy.prep_rollout()
+        batch_stats = defaultdict(list)
         with results_path.open("w", encoding="utf-8") as handle:
             for batch_index in range(self.args.eval_episodes // self.args.num_envs):
                 episode_offset = batch_index * self.args.num_envs
                 stats = self.eval(self.args.eval_obj_set, episode_offset=episode_offset)
+                for key, value in stats.items():
+                    batch_stats[key].append(value)
                 record = {
                     "obj_set": self.args.eval_obj_set,
                     "episode_ids": list(range(episode_offset, episode_offset + self.args.num_envs)),
@@ -289,6 +292,11 @@ class Runner:
                 }
                 handle.write(json.dumps(record, sort_keys=True) + "\n")
                 wandb.log({f"baseline/{key}": value for key, value in stats.items()}, step=batch_index)
+        overall_stats = {
+            f"baseline/overall_{key}": float(np.mean(values))
+            for key, values in batch_stats.items()
+        }
+        wandb.log(overall_stats, step=len(batch_stats["success"]))
         print(f"Saved evaluation records: {results_path}")
 
     @torch.no_grad()

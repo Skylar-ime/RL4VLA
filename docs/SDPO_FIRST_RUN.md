@@ -50,11 +50,11 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 批量 runner 默认关闭视频保存（`SAVE_RENDER=false`），避免每个 7B checkpoint 生成多 GB 视频；需要视频时显式设置 `SAVE_RENDER=true`。
 
-下一阶段 pilot 候选（**待预算确认，尚未执行**）：`EPISODE_LEN=80`、`NUM_ENVS=2`、每组 `STEPS_MAX=480`，即每组 3 轮、共 12 组。`INTERVAL_EVAL=1` 在每轮训练后评估固定的 train/test episode ID `0,1`，生成 160/320/480 步三个工程学习曲线点；`INTERVAL_SAVE=40` 只保存终点，避免三倍 checkpoint 占用。当前空闲磁盘约 `42 GiB`，单个 PPO/SDPO checkpoint 约 `0.9/1.1 GiB`，12 个终点 checkpoint 约需 `12 GiB`，还须预留日志与环境缓存。最终独立评估 episode 数量和正式长跑预算需另定；W&B 在线仍返回 HTTP 403，运行时先用离线模式。
+已完成 seed 0、每组 160 环境步的一轮延长 pilot（详见下文）。下一阶段候选（**多 seed 预算仍待确认，尚未执行**）：`EPISODE_LEN=80`、`NUM_ENVS=2`、每组 `STEPS_MAX=480`，即每组 3 轮、共 12 组。`INTERVAL_EVAL=1` 在每轮训练后评估固定的 train/test episode ID `0,1`，生成 160/320/480 步三个工程学习曲线点；`INTERVAL_SAVE=40` 只保存终点，避免三倍 checkpoint 占用。此前空闲磁盘约 `42 GiB`，单个 PPO/SDPO checkpoint 约 `0.9/1.1 GiB`，12 个终点 checkpoint 约需 `12 GiB`，还须预留日志与环境缓存。最终独立评估 episode 数量和正式长跑预算需另定。W&B 官方云端认证及在线写入现已验证，正常使用 `WANDB_MODE=online`，失败时才切换离线。
 
 ```bash
 SEEDS="0 1 2" NUM_ENVS=2 EPISODE_LEN=80 STEPS_MAX=480 \
-INTERVAL_EVAL=1 INTERVAL_SAVE=40 SAVE_RENDER=false WANDB_MODE=offline \
+INTERVAL_EVAL=1 INTERVAL_SAVE=40 SAVE_RENDER=false WANDB_MODE=online \
   bash SimplerEnv/scripts/run_sdpo_comparison.sh
 ```
 
@@ -132,3 +132,10 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 每个训练 rollout 结束后，对 train 和 test/OOD 各用 2 个固定 episode 评估（`NUM_ENVS=2`；不是配置中的 6，因为训练路径每次 eval 调用只评估当前两个并行环境）。W&B summary `eval/success` / `eval/success_ood`：PPO `1.0 / 0.0`，correct SDPO `1.0 / 0.5`，shuffled SDPO `1.0 / 0.0`，none SDPO `1.0 / 0.5`。每格仅 2 个 episode，不能解释为稳定成功率或 SDPO 优势；需要独立、多 episode、多 seed 复验。
 - 单轮训练数据：PPO `210.92 s`，correct SDPO `247.31 s`、loss `2.5786`，shuffled SDPO `242.32 s`、loss `2.6067`，none SDPO `243.11 s`、loss `0.0764`。这些数只覆盖这一配置的一轮 rollout/update，不是显著性或最终成本结论。四组 checkpoint 和 SDPO feedback JSONL 均保留于各自本地 `wandb/offline-run-*/glob/`。
 - 之前 30 个历史 run 曾同步失败，不能因本次 4 个 run 成功就视作已补传；如需云端完整历史，须筛选有效 run、用正确 workspace entity 加 `--include-synced` 重试，并逐一经 API 核验。旧 `.synced` 标记不作为成功证据。
+
+## 2026-11-12 六集冻结 checkpoint 对照
+
+- 为避免训练期仅评估 episode `0,1` 的小样本限制，对 warm-up、PPO 和三种 SDPO seed 0 / 160-step checkpoint 统一运行冻结策略 test 评估：`PutOnPlateInScene25Main-v3`、`EPISODE_LEN=80`、seed `0`、episode ID `0..5`，每批 2 个环境。各组同一 checkpoint 和测试 episode；无参数更新。结果按本地 `glob/eval_only.jsonl` 的三批统计等权合并。
+- Success / grasp：warm-up `0/6` / `4/6`；PPO `1/6` / `4/6`；correct SDPO `4/6` / `6/6`；shuffled SDPO `1/6` / `5/6`；none SDPO `2/6` / `6/6`。单 seed、六个 episode 只是探索性差异，不能推断泛化或反馈因果收益；尤其 none 与 correct 同样抓持 `6/6`，还需至少三训练种子和更多独立测试 episode。
+- W&B 全部已核实 `finished`，实体 `wqx349349-tongji-university`、项目 `RLVLA`：warm-up `fke1hpqs`；PPO `09n7h64z`；correct `d2drnr18`；shuffled `bqku833v`；none `7fqyjjfl`。每个 run 的 `glob/eval_only.jsonl` 保留每批的 episode IDs 和指标。
+- 发现 eval-only 旧逻辑的 W&B summary 只保留最后一批指标。现新增 `baseline/overall_*` 六集均值；并依据已归档 JSONL 回填上述五个 run 的云端 summary。验证代码通过 `py_compile`。之后运行 eval-only 会同时记录批次曲线和全评估集均值。
