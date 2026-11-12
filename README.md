@@ -21,6 +21,7 @@ When training on robot, evaluate completed checkpoints concurrently on the local
 
 ```bash
 TRAIN_JOB_ID=<robot-slurm-job-id> bash SimplerEnv/scripts/run_sdpo_v1_progressive_eval.sh
+conda run -n rlvla_env python SimplerEnv/scripts/summarize_sdpo_v1_eval.py --strict
 ```
 
 The experiment runner checks for a completed final checkpoint before rerunning an arm. Keep `RUN_ROOT` and W&B run directories for audit; remove only smoke-only temporary files.
