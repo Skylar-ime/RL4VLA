@@ -9,6 +9,7 @@
 - 初始化：RL4VLA 官方 warm-up checkpoint `gen-robot/openvla-7b-rlvla-warmup`；未加载 LoRA，动作分布为 `256` 个 bin，动作 token 为原 rollout token IDs。
 - 损失：学生正常 prompt 到 EMA 教师反馈 prompt 的 reverse KL；教师输出停止梯度。
 - SDPO 参考与本任务首版差异：本机 `/home/skylar/@lab/SDPO/verl/trainer/config/sdpo.yaml` 及 `verl/trainer/config/actor/actor.yaml` 默认 `alpha=0.5`（JSD）、top-100 加 tail、EMA 更新率 `0.05`；本任务明确选择 `alpha=1` 的 student-to-teacher reverse-KL，因 OpenVLA 动作支持仅 `256` bins 而对完整支持集计算精确分布，不做 top-K 重归一化；EMA 更新率 `0.01`，不叠加 PPO policy loss、advantage 权重或 rollout IS 修正。采样 temperature `1.0`，每个 rollout 立即更新一轮；该轮含多个 minibatch，早先 minibatch 的 rollout 对后续 minibatch 会有轻微批内 off-policy 偏差。以上是显式首版选择，不声称复现参考仓库默认配置；协议保存于 SDPO checkpoint 的 `sdpo_protocol.json`。
+- 关键先验与研究定位：ROAD-VLA 论文（[arXiv:2606.25800](https://arxiv.org/abs/2606.25800)，v1，2026-06-24）在 VR-UnseenTable 三 seed ablation 报告 PPO `87.2 ± 3.6%`、ROAD-VLA (RelSpatial PI) `4.68 ± 0.0%`、Plan+RelSpatial `4.68 ± 0.0%`、MCTS PI `75.8 ± 2.0%`。作者指出文本提示无法稳定提供 action-level supervision。故本计划 RelSpatial 文本教师是高风险研究假设，不能预设有效；小样本 smoke 的 `0/2` 不等于验证该结论。该论文方法也不同：其完整法以 advantage 扰动构造 action-space proximal teacher，并用 teacher-to-student forward KL；此处按任务要求使用 EMA 反馈文本教师与 student-to-teacher reverse-KL，结果不是 ROAD-VLA 复现或直接公平比较。先按计划完成有预算的小规模消融，再依据独立成功率决定是否继续，不把 KL 下降当成功。
 - 反馈：决策时刻 RelSpatial 状态文本。记录原始位置、关系向量、抓持字段、时间戳和文本到 `wandb` 的 `glob/feedback/episode_*.jsonl`。
 - 坐标约定：SAPIEN 世界坐标；`x<0` left、`x>0` right，`y<0` front、`y>0` back，`z<0` below、`z>0` above；方向死区 `0.01 m`，按最大绝对轴决定文本方向。
 
