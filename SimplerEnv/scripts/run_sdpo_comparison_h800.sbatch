@@ -11,7 +11,7 @@ set -euo pipefail
 
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate rlvla_env
-cd "$HOME/project"
+cd "$HOME/project/RL4VLA"
 
 export HF_HOME="${HF_HOME:-$HOME/hf-cache}"
 export MS_ASSET_DIR="${MS_ASSET_DIR:-$HOME/maniskill-assets}"
@@ -67,7 +67,7 @@ case "${1:-matrix}" in
             echo "Expected exactly 2 allocated GPUs, got ${CUDA_VISIBLE_DEVICES}" >&2
             exit 2
         fi
-        run_root="$HOME/project/experiments/${SLURM_JOB_ID:-manual}"
+        run_root="$HOME/project/RL4VLA/experiments/${SLURM_JOB_ID:-manual}"
         mkdir -p "$run_root"
         run_seed() {
             local seed="$1"
