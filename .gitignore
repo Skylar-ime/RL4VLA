@@ -20,5 +20,6 @@ __pycache__
 /SimpleEnv/octo_collect/
 /SimpleEnv/wandb/
 /wandb/
+/experiments/
 /ManiSkill/.eggs/
 

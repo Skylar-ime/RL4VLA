@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
-#SBATCH --output=rlvla-sdpo-%j.out
+#SBATCH --output=/public/home/s2250018/project/rlvla-sdpo-%j.out
 
 set -euo pipefail
 

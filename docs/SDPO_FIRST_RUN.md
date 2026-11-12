@@ -54,6 +54,8 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 远端方案：`ssh robot` 是登录节点，仓库同步到 `/public/home/s2250018/project/RL4VLA`，GPU 通过 `/opt/gridview/slurm/bin/sbatch` 投递至 `h800` 分区。项目全程最多申请 2 张 H800：smoke 和正式矩阵各用一个 Slurm 作业，每个作业单次申请 2 张；矩阵在一个作业内并行跑两个 seed，第三个 seed 等前两者结束后复用 GPU，不使用 job array 或额外 GPU 申请。`smoke` 模式执行一次真实 SDPO 更新并重载 checkpoint 评估，自动删除其专属临时 run/checkpoint 目录，只保留 Slurm 日志；`matrix` 的离线 W&B run 保存在 `experiments/<job-id>/seed<N>`。远端尚无 W&B 登录凭据，run 先用 `WANDB_MODE=offline` 保留完整数据，再复制回本机用已验证凭据同步至官方 W&B 项目。
 
+本机已有 480 步三 seed 矩阵运行中；必须先核对完成的 run，不得再用远端 `matrix` 重复消耗同一预算。远端 Slurm 日志保存在仓库外的 `/public/home/s2250018/project/rlvla-sdpo-<job-id>.out`；`experiments/` 为 Git 忽略的运行产物。robot 无法直连 Hugging Face，模型按固定 revision 从 `https://hf-mirror.com` 下载，完整下载后逐分片与本机 warm-up snapshot 的 SHA-256 校验一致再做 smoke。
+
 在 `ssh robot` 登录节点执行，smoke 完成并核验后再投递矩阵：
 
 ```bash
