@@ -15,6 +15,7 @@ cd "$HOME/project/RL4VLA"
 
 export HF_HOME="${HF_HOME:-$HOME/hf-cache}"
 export MS_ASSET_DIR="${MS_ASSET_DIR:-$HOME/maniskill-assets}"
+export VLA_PATH="${VLA_PATH:-$HF_HOME/models/openvla-7b-rlvla-warmup}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 export PYTHONNOUSERSITE=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -33,7 +34,7 @@ case "${1:-matrix}" in
             --alg-name sdpo \
             --sdpo-feedback-mode correct \
             --env-id PutOnPlateInScene25Main-v3 \
-            --vla-path gen-robot/openvla-7b-rlvla-warmup \
+            --vla-path "$VLA_PATH" \
             --vla-load-path '' \
             --seed 0 \
             --num-envs 1 \
@@ -50,7 +51,7 @@ case "${1:-matrix}" in
         python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
             --alg-name sdpo \
             --env-id PutOnPlateInScene25Main-v3 \
-            --vla-path gen-robot/openvla-7b-rlvla-warmup \
+            --vla-path "$VLA_PATH" \
             --vla-load-path "$checkpoint" \
             --seed 0 \
             --num-envs 1 \
