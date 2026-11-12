@@ -45,7 +45,7 @@ case "${1:-matrix}" in
             --eval-episodes 2 \
             --name h800-sdpo-mechanism-smoke \
             --no-save-render
-        latest_run="$(find "$WANDB_DIR" -maxdepth 1 -type d -name 'offline-run-*' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d ' ' -f 2-)"
+        latest_run="$(find "$WANDB_DIR/wandb" -maxdepth 1 -type d -name 'offline-run-*' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d ' ' -f 2-)"
         checkpoint="$latest_run/glob/steps_0000"
         test -f "$checkpoint/sdpo_protocol.json"
         python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
