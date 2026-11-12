@@ -51,8 +51,8 @@ def build_manifest(wandb_dir: Path) -> list[str]:
     if missing:
         raise ValueError(f"missing runs: {', '.join(missing)}")
     lines = ["warmup\t-"]
-    for arm in ARM_NAMES:
-        for seed in range(3):
+    for seed in range(3):
+        for arm in ARM_NAMES:
             name = f"{arm}-seed{seed}-480steps"
             lines.append(f"{name}\t{checkpoints[name]}")
     return lines
