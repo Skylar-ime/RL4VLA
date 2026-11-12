@@ -52,7 +52,7 @@ python SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 已完成 seed 0、每组 160 环境步的一轮延长 pilot（详见下文）。用户已确认下一轮预算：四个训练组各跑 seeds `0,1,2`、每组 `STEPS_MAX=480`、共 12 个训练 run；固定 `EPISODE_LEN=80`、`NUM_ENVS=2`，即每个 run 三轮、每轮 160 环境步。`INTERVAL_EVAL=1` 在 160/320/480 步评估固定 train/test episode `0,1`，作工程学习曲线；最终每个训练 seed checkpoint 独立评估 6 个固定 test episodes，warm-up 评估同一 6 集，共 78 个最终评估 episode。`INTERVAL_SAVE=40` 只保存终点；12 个 checkpoint 预计约 `12 GiB`，训练与评估均关闭视频。
 
-远端方案：`ssh robot` 是登录节点，仓库同步到 `/public/home/s2250018/project/RL4VLA`，GPU 通过 `/opt/gridview/slurm/bin/sbatch` 投递至 `h800` 分区。项目全程最多申请 2 张 H800：smoke 和正式矩阵各用一个 Slurm 作业，每个作业单次申请 2 张；矩阵在一个作业内并行跑两个 seed，第三个 seed 等前两者结束后复用 GPU，不使用 job array 或额外 GPU 申请。`smoke` 模式执行一次真实 SDPO 更新并重载 checkpoint 评估，自动删除其专属临时 run/checkpoint 目录，只保留 Slurm 日志；`matrix` 的离线 W&B run 保存在 `experiments/<job-id>/seed<N>`。远端尚无 W&B 登录凭据，run 先用 `WANDB_MODE=offline` 保留完整数据，再复制回本机用已验证凭据同步至官方 W&B 项目。
+远端方案：`ssh robot` 是登录节点，仓库同步到 `/public/home/s2250018/project/RL4VLA`，GPU 通过 `/opt/gridview/slurm/bin/sbatch` 投递至 `h800` 分区。项目同时最多占用 2 张训练 GPU：本机矩阵占 1 张时，远端 smoke 只申请 1 张 H800；备用正式矩阵须在本机训练结束后，以单个 Slurm 作业申请 2 张 H800，在作业内并行跑两个 seed，第三个 seed 等前两者结束后复用 GPU，不使用 job array 或额外 GPU 申请。`smoke` 模式执行一次真实 SDPO 更新并重载 checkpoint 评估，自动删除其专属临时 run/checkpoint 目录，只保留 Slurm 日志；`matrix` 的离线 W&B run 保存在 `experiments/<job-id>/seed<N>`。远端尚无 W&B 登录凭据，run 先用 `WANDB_MODE=offline` 保留完整数据，再复制回本机用已验证凭据同步至官方 W&B 项目。
 
 本机已有 480 步三 seed 矩阵运行中；必须先核对完成的 run，不得再用远端 `matrix` 重复消耗同一预算。远端 Slurm 日志保存在仓库外的 `/public/home/s2250018/project/rlvla-sdpo-<job-id>.out`；`experiments/` 为 Git 忽略的运行产物。robot 无法直连 Hugging Face，模型按固定 revision 从 `https://hf-mirror.com` 下载，完整下载后逐分片与本机 warm-up snapshot 的 SHA-256 校验一致再做 smoke。
 
@@ -66,7 +66,7 @@ cd /public/home/s2250018/project/RL4VLA
 
 ```bash
 cd /public/home/s2250018/project/RL4VLA
-/opt/gridview/slurm/bin/sbatch SimplerEnv/scripts/run_sdpo_comparison_h800.sbatch matrix
+/opt/gridview/slurm/bin/sbatch --gres=gpu:2 SimplerEnv/scripts/run_sdpo_comparison_h800.sbatch matrix
 ```
 
 ```bash
