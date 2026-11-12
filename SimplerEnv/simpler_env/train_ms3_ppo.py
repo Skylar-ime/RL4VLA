@@ -224,7 +224,12 @@ class Runner:
         return path
 
     @torch.no_grad()
-    def eval(self, obj_set: str, episode_offset: int = 0) -> dict:
+    def eval(
+        self,
+        obj_set: str,
+        episode_offset: int = 0,
+        return_episode_stats: bool = False,
+    ) -> dict | tuple[dict, list[dict]]:
         self.policy.prep_rollout()
         env_infos = defaultdict(lambda: [])
         cpu_rng_state = torch.get_rng_state()
@@ -236,6 +241,7 @@ class Runner:
         )
         obs_img, instruction, info = self.env.reset(obj_set=obj_set, episode_ids=episode_ids)
         completed = torch.zeros(self.args.num_envs, dtype=torch.bool, device=self.device)
+        episode_stats = {}
 
         for _ in range(self.args.episode_len):
             obs = dict(image=obs_img, task_description=instruction)
@@ -251,8 +257,13 @@ class Runner:
                     if completed[env_index]:
                         continue
                     completed[env_index] = True
+                    episode_id = int(episode_ids[env_index].item())
+                    episode_record = {"episode_id": episode_id}
                     for key, values in env_info["episode"].items():
-                        env_infos[key].append(values[value_index])
+                        value = float(values[value_index])
+                        env_infos[key].append(value)
+                        episode_record[key] = value
+                    episode_stats[episode_id] = episode_record
                 if completed.all():
                     break
 
@@ -268,6 +279,8 @@ class Runner:
         print(pprint.pformat({k: round(v, 4) for k, v in env_stats.items()}))
         print(f"")
 
+        if return_episode_stats:
+            return env_stats, [episode_stats[key] for key in sorted(episode_stats)]
         return env_stats
 
     @torch.no_grad()
@@ -292,18 +305,23 @@ class Runner:
         if self.args.eval_obj_set not in {"train", "test"}:
             raise ValueError("eval_obj_set must be 'train' or 'test'")
 
-        results_path = self.glob_dir / "eval_only.jsonl"
+        results_path = self.save_dir / "eval_only.jsonl"
         self.policy.prep_rollout()
         batch_stats = defaultdict(list)
         with results_path.open("w", encoding="utf-8") as handle:
             for batch_index in range(self.args.eval_episodes // self.args.num_envs):
                 episode_offset = batch_index * self.args.num_envs
-                stats = self.eval(self.args.eval_obj_set, episode_offset=episode_offset)
+                stats, episode_stats = self.eval(
+                    self.args.eval_obj_set,
+                    episode_offset=episode_offset,
+                    return_episode_stats=True,
+                )
                 for key, value in stats.items():
                     batch_stats[key].append(value)
                 record = {
                     "obj_set": self.args.eval_obj_set,
                     "episode_ids": list(range(episode_offset, episode_offset + self.args.num_envs)),
+                    "episode_stats": episode_stats,
                     **stats,
                 }
                 handle.write(json.dumps(record, sort_keys=True) + "\n")
