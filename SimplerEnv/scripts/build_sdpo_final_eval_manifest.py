@@ -15,7 +15,7 @@ NAME_PATTERN = re.compile(r"^(ppo-none|sdpo-(?:correct|shuffled|none))-seed([012
 
 def build_manifest(wandb_dir: Path) -> list[str]:
     checkpoints = {}
-    for config_path in sorted(wandb_dir.glob("run-*/glob/config.yaml")):
+    for config_path in sorted(wandb_dir.glob("*run-*/glob/config.yaml")):
         config = yaml.safe_load(config_path.read_text())
         name = config.get("name", "")
         match = NAME_PATTERN.fullmatch(name)
