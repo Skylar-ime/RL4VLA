@@ -27,11 +27,11 @@ run_arm() {
     local last_episode=$((STEPS_MAX / (NUM_ENVS * EPISODE_LEN) - 1))
     local final_checkpoint
     printf -v final_checkpoint 'steps_%04d' "$last_episode"
-    if find "$run_dir/wandb" -path "*/glob/$final_checkpoint/sdpo_protocol.json" -print -quit 2>/dev/null | rg -q .; then
+    if [[ -n "$(find "$run_dir/wandb" -path "*/glob/$final_checkpoint/sdpo_protocol.json" -print -quit 2>/dev/null)" ]]; then
         echo "Already complete: $name"
         return
     fi
-    if [[ "$alg" == "ppo" ]] && find "$run_dir/wandb" -path "*/glob/$final_checkpoint/dataset_statistics.json" -print -quit 2>/dev/null | rg -q .; then
+    if [[ "$alg" == "ppo" && -n "$(find "$run_dir/wandb" -path "*/glob/$final_checkpoint/dataset_statistics.json" -print -quit 2>/dev/null)" ]]; then
         echo "Already complete: $name"
         return
     fi
