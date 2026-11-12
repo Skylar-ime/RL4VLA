@@ -10,6 +10,13 @@ cd "$(dirname "$0")/../.."
 : "${EVAL_ROOT:=$RUN_ROOT/evaluation}"
 : "${MS_ASSET_DIR:=/home/skylar/@lab/hf-cache/maniskill}"
 : "${VLA_PATH:=/home/skylar/.cache/huggingface/hub/models--gen-robot--openvla-7b-rlvla-warmup/snapshots/735fd5d1f4472c4c9f3f998f0e89aa641af5ad03}"
+: "${EVAL_NUM_ENVS:=6}"
+
+if (( EVAL_NUM_ENVS < 1 || 30 % EVAL_NUM_ENVS != 0 )); then
+    echo "EVAL_NUM_ENVS must divide 30" >&2
+    exit 2
+fi
+expected_batches=$((30 / EVAL_NUM_ENVS))
 
 export MS_ASSET_DIR WANDB_MODE=offline
 export PYTHONPATH="SimplerEnv:ManiSkill:openvla${PYTHONPATH:+:${PYTHONPATH}}"
@@ -32,7 +39,7 @@ for seed in 0 1; do
             label="${name}-steps${steps}"
             eval_dir="$EVAL_ROOT/$label"
             completed=$(find "$eval_dir/wandb" -name eval_only.jsonl -type f -print -quit 2>/dev/null || true)
-            if [[ -n "$completed" && $(wc -l < "$completed") -eq 15 ]]; then
+            if [[ -n "$completed" && $(wc -l < "$completed") -eq "$expected_batches" ]]; then
                 echo "Already evaluated: $label"
                 continue
             fi
@@ -65,7 +72,7 @@ for seed in 0 1; do
                 --vla-path "$VLA_PATH" \
                 --vla-load-path "$copy_dir/checkpoint" \
                 --seed 0 \
-                --num-envs 2 \
+                --num-envs "$EVAL_NUM_ENVS" \
                 --episode-len 80 \
                 --eval-only \
                 --eval-episodes 30 \
@@ -74,7 +81,7 @@ for seed in 0 1; do
                 --no-save-render >"$eval_dir/eval.log" 2>&1
 
             completed=$(find "$eval_dir/wandb" -name eval_only.jsonl -type f -print -quit)
-            if [[ -z "$completed" || $(wc -l < "$completed") -ne 15 ]]; then
+            if [[ -z "$completed" || $(wc -l < "$completed") -ne "$expected_batches" ]]; then
                 echo "Incomplete 30-episode evaluation: $label" >&2
                 exit 1
             fi
