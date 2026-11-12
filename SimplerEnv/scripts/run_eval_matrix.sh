@@ -32,16 +32,18 @@ manifest_input="$CHECKPOINT_MANIFEST"
 
 while IFS=$'\t' read -r label checkpoint; do
     [[ -z "$label" || "$label" == \#* ]] && continue
-    if [[ ! -d "$checkpoint" ]]; then
+    if [[ "$checkpoint" != "-" && ! -d "$checkpoint" ]]; then
         echo "checkpoint not found for $label: $checkpoint" >&2
         exit 2
     fi
+    load_path="$checkpoint"
+    [[ "$checkpoint" == "-" ]] && load_path=""
     for env_id in $ENV_IDS; do
         conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
             --alg-name ppo \
             --env-id "$env_id" \
             --vla-path "$VLA_PATH" \
-            --vla-load-path "$checkpoint" \
+            --vla-load-path "$load_path" \
             --seed "$SEED" \
             --num-envs "$NUM_ENVS" \
             --episode-len "$EPISODE_LEN" \

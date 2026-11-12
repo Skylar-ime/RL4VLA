@@ -99,6 +99,16 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 
 多 checkpoint 或 ID/OOD 环境评估可使用 `SimplerEnv/scripts/run_eval_matrix.sh`。输入 TSV 每行一个 `label<TAB>checkpoint`，示例见 `docs/sdpo_eval_matrix.tsv.example`；`ENV_IDS` 可传空格分隔的多个已在当前源码核实过的环境 ID。该入口只评估冻结 checkpoint，不更新参数。
 
+本轮 480 步矩阵结束后，从 W&B 本地 run 的配置生成最终评估清单。生成器要求四组各三 seed、同一任务与预算、完整终点 checkpoint 和 SDPO 协议，缺项或重复即报错；清单首行为不后训练 warm-up。下列命令固定 test episode `0..5`，每个 checkpoint 六集，共 `13 × 6 = 78` 集。务必等本机矩阵进程结束后执行，避免共用 4090 显存；评估 run 保持 `WANDB_MODE=online`。
+
+```bash
+conda run -n rlvla_env python SimplerEnv/scripts/build_sdpo_final_eval_manifest.py \
+  --wandb-dir wandb > /tmp/rlvla-final-eval.tsv
+CHECKPOINT_MANIFEST=/tmp/rlvla-final-eval.tsv \
+EVAL_EPISODES=6 NUM_ENVS=2 EPISODE_LEN=80 SEED=0 EVAL_OBJ_SET=test \
+WANDB_MODE=online bash SimplerEnv/scripts/run_eval_matrix.sh
+```
+
 评估入口 smoke 已通过：PPO seed0 checkpoint、`PutOnPlateInScene25Main-v3`、2 个 test episode，W&B run `wandb/offline-run-20261112_032258-zl20amqe`，success `1/2`。
 
 同一冻结 PPO seed0 checkpoint 的 OOD smoke：`PutOnPlateInScene25VisionImage-v1` success `2/2`（W&B `wandb/offline-run-20261112_032920-8yxyjxq5`）；`PutOnPlateInScene25PositionChangeTo-v1` success `0/2`（W&B `wandb/offline-run-20261112_033145-yrb0c0ed`）。每个环境仅 2 个 episode，只证明环境入口和评估协议可运行，不代表泛化结论。

@@ -1,7 +1,7 @@
 # label<TAB>checkpoint path
 # Keep this file local, or pass CHECKPOINT_MANIFEST=/path/to/manifest.tsv.
 # Example:
-# warmup\t/path/to/warmup/adapter
+# warmup\t-
 # ppo-seed0\t/path/to/ppo/glob/steps_0000
 # sdpo-correct-seed0\t/path/to/sdpo/glob/steps_0000
 # Use CHECKPOINT_MANIFEST=- to read the same TSV from stdin.
