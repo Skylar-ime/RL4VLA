@@ -15,6 +15,12 @@ CHECKPOINT_MANIFEST=experiments/sdpo-v1/eval_manifest.tsv EVAL_EPISODES=30 \
   bash SimplerEnv/scripts/run_eval_matrix.sh
 ```
 
+When training on robot, evaluate completed checkpoints concurrently on the local 4090 without keeping duplicate checkpoints on the nearly full local disk:
+
+```bash
+TRAIN_JOB_ID=<robot-slurm-job-id> bash SimplerEnv/scripts/run_sdpo_v1_progressive_eval.sh
+```
+
 The experiment runner checks for a completed final checkpoint before rerunning an arm. Keep `RUN_ROOT` and W&B run directories for audit; remove only smoke-only temporary files.
 
 [![arXiv](https://img.shields.io/badge/arXiv-2505.19789-red.svg)](http://arxiv.org/abs/2505.19789)
