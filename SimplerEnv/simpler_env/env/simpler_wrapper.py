@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from mani_skill.envs.sapien_env import BaseEnv
-from simpler_env.feedback import build_rel_spatial_feedback
+from simpler_env.feedback import build_action_guidance_feedback, build_rel_spatial_feedback
 
 
 def completed_episode_info(info, done):
@@ -133,8 +133,12 @@ class SimlerWrapper:
 
         return obs_image, instruction, info
 
-    def capture_feedback(self):
+    def capture_feedback(self, raw_action=None, version="relspatial-v2"):
         """Capture privileged state before action execution, aligned to current observation."""
+        if version not in {"relspatial-v2", "relspatial-action-v1"}:
+            raise ValueError(f"Unknown feedback version: {version}")
+        if version == "relspatial-action-v1" and raw_action is None:
+            raise ValueError("Action guidance requires the sampled action")
         task = self.env.unwrapped
         extra = getattr(task, "extra_stats", {})
         episode_stats = getattr(task, "episode_stats", {})
@@ -152,6 +156,14 @@ class SimlerWrapper:
         target_names = selected_names("select_plate_ids", "plate_names", "model_db_plate", "target_obj_name")
         gripper_open = None
         robot = getattr(getattr(task, "agent", None), "robot", None)
+        current_grasped = None
+        action_delta = self._process_action(raw_action) if raw_action is not None else None
+        root_quaternion = robot.pose.q if robot is not None else None
+        if version == "relspatial-action-v1" and hasattr(task, "objs_carrot") and hasattr(task, "select_carrot_ids"):
+            current_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=task.select_carrot_ids.device)
+            for object_index, object_name in enumerate(task.carrot_names):
+                grasped = task.agent.is_grasping(task.objs_carrot[object_name])
+                current_grasped = torch.where(task.select_carrot_ids == object_index, grasped, current_grasped)
         if robot is not None:
             active_joints = getattr(robot, "active_joints", [])
             joint_names = [joint.name for joint in active_joints]
@@ -176,9 +188,16 @@ class SimlerWrapper:
                 source_position=at(extra.get("extra_pos_carrot"), index),
                 target_position=at(extra.get("extra_pos_plate"), index),
                 gripper_position=at(extra.get("extra_pos_gripper"), index),
-                source_grasped=at(episode_stats.get("is_src_obj_grasped"), index),
+                source_grasped=at(current_grasped if version == "relspatial-action-v1" else episode_stats.get("is_src_obj_grasped"), index),
                 gripper_open=at(gripper_open, index),
             )
+            if version == "relspatial-action-v1":
+                record = build_action_guidance_feedback(
+                    record,
+                    action_delta_root=action_delta[index, :3],
+                    root_quaternion_wxyz=at(root_quaternion, index),
+                    gripper_command=action_delta[index, 6],
+                )
             self.decision_index[index] += 1
             records.append(record)
         return records

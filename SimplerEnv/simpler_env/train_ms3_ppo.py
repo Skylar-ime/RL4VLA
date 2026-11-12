@@ -81,6 +81,7 @@ class Args:
     alg_entropy_coef: float = 0.0
     sdpo_ema_rate: float = 0.01
     sdpo_feedback_mode: str = "correct"  # correct, shuffled, none
+    sdpo_feedback_version: str = "relspatial-v2"  # relspatial-v2, relspatial-action-v1
 
     # other
     wandb: bool = True
@@ -96,6 +97,8 @@ class Runner:
 
         # alg_name
         assert self.args.alg_name in ["ppo", "grpo", "sdpo"]
+        if self.args.sdpo_feedback_version not in {"relspatial-v2", "relspatial-action-v1"}:
+            raise ValueError(f"Unknown sdpo_feedback_version: {self.args.sdpo_feedback_version}")
 
         # set seed
         np.random.seed(self.args.seed)
@@ -445,7 +448,10 @@ class Runner:
 
             for _ in tqdm(range(self.args.episode_len), desc="rollout"):
                 value, action, logprob = self.collect()
-                feedback = self.env.capture_feedback() if self.args.alg_name == "sdpo" else None
+                feedback = self.env.capture_feedback(
+                    raw_action=action if self.args.sdpo_feedback_version == "relspatial-action-v1" else None,
+                    version=self.args.sdpo_feedback_version,
+                ) if self.args.alg_name == "sdpo" else None
                 obs_img, reward, done, env_info = self.env.step(action)
 
                 data = (obs_img, action, logprob, value, reward, done, feedback)

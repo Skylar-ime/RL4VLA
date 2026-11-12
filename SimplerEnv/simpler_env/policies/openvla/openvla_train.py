@@ -353,8 +353,8 @@ class OpenVLAPolicy:
                 "action_support": "OpenVLA discrete action bins 32000-256:32000",
                 "token_alignment": "raw rollout action IDs appended after tokenized prefix",
                 "feedback_mode": self.args.sdpo_feedback_mode,
-                "feedback_source": "decision-time privileged RelSpatial state",
-                "feedback_text_version": "relspatial-v2-grammatical-directions",
+                "feedback_source": "decision-time privileged RelSpatial state and sampled-action heuristic" if self.args.sdpo_feedback_version == "relspatial-action-v1" else "decision-time privileged RelSpatial state",
+                "feedback_text_version": "relspatial-action-v1" if self.args.sdpo_feedback_version == "relspatial-action-v1" else "relspatial-v2-grammatical-directions",
                 "ppo_policy_loss": False,
                 "advantage_weighting": False,
             }

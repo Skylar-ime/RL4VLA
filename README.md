@@ -1,5 +1,22 @@
 # VLA-RL-Study: What Can RL Bring to VLA Generalization? An Empirical Study
 
+## SDPO RelSpatial Action Feedback v1 (`ex/1111-v1`)
+
+The earlier `ex/1111` RelSpatial experiment remains unchanged: its teacher reads decision-time positions, grasp and gripper state; its student never reads privileged feedback. The 480-step, three-seed result is in [`docs/SDPO_FIRST_RUN.md`](docs/SDPO_FIRST_RUN.md). It did not show a consistent advantage over PPO or the shuffled/none controls.
+
+This branch adds an opt-in `--sdpo-feedback-version relspatial-action-v1`. After sampling an action and before executing it, the program builds a geometric next-action suggestion and compares the sampled displacement or gripper command with that suggestion. It uses the **current** selected-object grasp test, not the task's episode-accumulated grasp flag. World-frame offsets are rotated into the robot-root frame before comparing with OpenVLA action deltas. A missing state or transform produces `unknown`; close to a held object's target, release is not asserted without support evidence. This is a heuristic critique of the sampled action, not an execution-outcome label, a proof of optimal action, or the ROAD-VLA advantage-logit method. The original `relspatial-v2` option remains the default and produces the old records.
+
+Confirmed v1 budget: `PutOnPlateInScene25Main-v3`, four arms (PPO, old RelSpatial SDPO, v1 correct SDPO, v1 shuffled SDPO), training seeds `0,1`, `2400` environment steps each, `NUM_ENVS=2`, `EPISODE_LEN=80`. Save checkpoints at 800, 1600 and 2400 steps; evaluate each frozen checkpoint on 30 fixed test episodes, separately from training. The two SDPO feedback versions use the same EMA reverse-KL mechanism and warm-up initialization. At most two training GPUs may be used at once; prefer one robot H800, fall back to the local 4090. Training runs use W&B; offline runs must be synced and verified before claiming cloud availability.
+
+```bash
+SEEDS='0 1' RUN_ROOT=experiments/sdpo-v1 bash SimplerEnv/scripts/run_sdpo_v1_comparison.sh
+python SimplerEnv/scripts/build_sdpo_v1_eval_manifest.py --run-root experiments/sdpo-v1 > experiments/sdpo-v1/eval_manifest.tsv
+CHECKPOINT_MANIFEST=experiments/sdpo-v1/eval_manifest.tsv EVAL_EPISODES=30 \
+  bash SimplerEnv/scripts/run_eval_matrix.sh
+```
+
+The experiment runner checks for a completed final checkpoint before rerunning an arm. Keep `RUN_ROOT` and W&B run directories for audit; remove only smoke-only temporary files.
+
 [![arXiv](https://img.shields.io/badge/arXiv-2505.19789-red.svg)](http://arxiv.org/abs/2505.19789)
 [![Website](https://img.shields.io/badge/Website-RLVLA-green.svg)](https://rlvla.github.io)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-models-yellow.svg)](https://huggingface.co/collections/gen-robot/rlvla-684bc48aa6cf28bac37c57a2)

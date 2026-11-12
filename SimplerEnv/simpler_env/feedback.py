@@ -30,6 +30,31 @@ class RelSpatialRecord:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class ActionGuidanceRecord:
+    state: RelSpatialRecord
+    desired_delta_root: tuple[float, float, float] | None
+    action_delta_root: tuple[float, float, float] | None
+    suggested_action: str
+    action_judgment: str
+    text: str
+
+    @property
+    def timestamp_utc(self) -> str:
+        return self.state.timestamp_utc
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.state.to_dict(),
+            "feedback_version": "relspatial-action-v1",
+            "desired_delta_root": self.desired_delta_root,
+            "action_delta_root": self.action_delta_root,
+            "suggested_action": self.suggested_action,
+            "action_judgment": self.action_judgment,
+            "text": self.text,
+        }
+
+
 def _vec(value: Any) -> tuple[float, float, float] | None:
     if value is None:
         return None
@@ -109,3 +134,54 @@ def build_rel_spatial_feedback(*, episode_id: int | str | None, decision_index: 
 
 def records_to_jsonable(records: Sequence[RelSpatialRecord | None]) -> list[dict[str, Any] | None]:
     return [record.to_dict() if record is not None else None for record in records]
+
+
+def build_action_guidance_feedback(
+    state: RelSpatialRecord,
+    *,
+    action_delta_root: Any,
+    root_quaternion_wxyz: Any,
+    gripper_command: Any,
+    approach_m: float = 0.03,
+    movement_deadband_m: float = 0.005,
+) -> ActionGuidanceRecord:
+    """Judge a sampled action against a decision-time geometric heuristic."""
+    action = _vec(action_delta_root)
+    if hasattr(root_quaternion_wxyz, "detach"):
+        root_quaternion_wxyz = root_quaternion_wxyz.detach().cpu().numpy()
+    quaternion = np.asarray(root_quaternion_wxyz, dtype=np.float64).reshape(-1) if root_quaternion_wxyz is not None else None
+    desired_world = state.source_to_gripper if state.source_grasped is False else (
+        tuple(-value for value in state.source_to_target) if state.source_to_target is not None else None
+    )
+    desired = None
+    if desired_world is not None and quaternion is not None and quaternion.size == 4 and np.isfinite(quaternion).all():
+        norm = np.linalg.norm(quaternion)
+        if norm > 0:
+            scalar, vector = quaternion[0] / norm, quaternion[1:] / norm
+            world = np.asarray(desired_world)
+            desired = _vec(world + 2 * np.cross(-vector, np.cross(-vector, world) + scalar * world))
+
+    if state.source_grasped is None:
+        suggestion, judgment = "unknown", "unknown"
+    elif desired is None:
+        suggestion, judgment = "unknown", "unknown"
+    elif np.linalg.norm(desired) < approach_m:
+        if state.source_grasped:
+            suggestion, judgment = "release only when placement is supported", "unknown"
+        else:
+            suggestion = "close the gripper on the source object"
+            command = _bool(gripper_command < 0) if gripper_command is not None else None
+            judgment = "aligned" if command else "not aligned" if command is False else "unknown"
+    else:
+        direction = _direction(desired_world, movement_deadband_m)
+        direction = {"below": "down", "above": "up", "front": "forward", "back": "backward"}.get(direction, direction)
+        target = "source object" if state.source_grasped is False else "target container"
+        suggestion = f"move {direction} in the world frame toward the {target}"
+        if action is None or np.linalg.norm(action) < movement_deadband_m:
+            judgment = "not aligned" if action is not None else "unknown"
+        else:
+            cosine = float(np.dot(action, desired) / (np.linalg.norm(action) * np.linalg.norm(desired)))
+            judgment = "aligned" if cosine >= 0.5 else "opposed" if cosine <= -0.5 else "not aligned"
+
+    text = f"{state.text} Suggested next action: {suggestion}. Sampled action is {judgment} with this suggestion."
+    return ActionGuidanceRecord(state, desired, action, suggestion, judgment, text)

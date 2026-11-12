@@ -3,7 +3,7 @@ import numpy as np
 from types import SimpleNamespace
 from transformers import BatchFeature
 
-from simpler_env.feedback import build_rel_spatial_feedback
+from simpler_env.feedback import build_action_guidance_feedback, build_rel_spatial_feedback
 from simpler_env.env.simpler_wrapper import completed_episode_info
 from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
@@ -62,6 +62,90 @@ def test_rel_spatial_feedback_uses_grammatical_directions():
         )
         assert f"object is {phrase} target." in record.text
         assert f"object is {phrase} the gripper" in record.text
+
+
+def test_v1_guidance_transforms_world_direction_to_robot_root():
+    state = build_rel_spatial_feedback(
+        episode_id=0, decision_index=1, source_name="object", target_name="plate",
+        source_position=[0.2, 0.0, 0.0], target_position=[0.4, 0.0, 0.0],
+        gripper_position=[0.0, 0.0, 0.0], source_grasped=False,
+    )
+    record = build_action_guidance_feedback(
+        state, action_delta_root=[-0.02, 0.0, 0.0],
+        root_quaternion_wxyz=[0.0, 0.0, 0.0, 1.0], gripper_command=1.0,
+    )
+    assert record.suggested_action == "move right in the world frame toward the source object"
+    assert record.action_judgment == "aligned"
+    assert record.to_dict()["feedback_version"] == "relspatial-action-v1"
+    assert "Sampled action is aligned" in record.text
+
+
+def test_v1_guidance_uses_current_grasp_and_handles_unknown():
+    state = build_rel_spatial_feedback(
+        episode_id=0, decision_index=1, source_name="object", target_name="plate",
+        source_position=[0.0, 0.0, 0.0], target_position=[0.0, 0.0, -0.2],
+        gripper_position=[0.0, 0.0, 0.0], source_grasped=True,
+    )
+    record = build_action_guidance_feedback(
+        state, action_delta_root=[0.0, 0.0, -0.02],
+        root_quaternion_wxyz=[0.0, 0.0, 0.0, 1.0], gripper_command=-1.0,
+    )
+    assert record.suggested_action == "move down in the world frame toward the target container"
+    assert record.action_judgment == "aligned"
+    unknown = build_action_guidance_feedback(
+        state, action_delta_root=[0.0, 0.0, -0.02],
+        root_quaternion_wxyz=None, gripper_command=-1.0,
+    )
+    assert unknown.action_judgment == "unknown"
+
+
+def test_v1_guidance_near_source_recommends_closing():
+    state = build_rel_spatial_feedback(
+        episode_id=0, decision_index=1, source_name="object", target_name="plate",
+        source_position=[0.0, 0.0, 0.01], target_position=[0.2, 0.0, 0.0],
+        gripper_position=[0.0, 0.0, 0.0], source_grasped=False,
+    )
+    record = build_action_guidance_feedback(
+        state, action_delta_root=[0.0, 0.0, 0.0],
+        root_quaternion_wxyz=[1.0, 0.0, 0.0, 0.0], gripper_command=-1.0,
+    )
+    assert record.action_judgment == "aligned"
+
+
+def test_v1_wrapper_reads_current_grasp_not_episode_history():
+    from simpler_env.env.simpler_wrapper import SimlerWrapper
+
+    wrapper = object.__new__(SimlerWrapper)
+    wrapper.num_envs = 1
+    wrapper.episode_ids = [0]
+    wrapper.decision_index = [0]
+    robot = SimpleNamespace(
+        pose=SimpleNamespace(q=torch.tensor([[1.0, 0.0, 0.0, 0.0]])),
+        active_joints=[],
+    )
+    agent = SimpleNamespace(robot=robot, is_grasping=lambda obj: torch.tensor([False]))
+    task = SimpleNamespace(
+        agent=agent,
+        objs_carrot={"carrot": object()},
+        carrot_names=["carrot"],
+        model_db_carrot={"carrot": {"name": "carrot"}},
+        model_db_plate={"plate": {"name": "plate"}},
+        plate_names=["plate"],
+        select_carrot_ids=torch.tensor([0]),
+        select_plate_ids=torch.tensor([0]),
+        episode_stats={"is_src_obj_grasped": torch.tensor([True])},
+        extra_stats={
+            "extra_pos_carrot": torch.tensor([[0.1, 0.0, 0.0]]),
+            "extra_pos_plate": torch.tensor([[0.2, 0.0, 0.0]]),
+            "extra_pos_gripper": torch.tensor([[0.0, 0.0, 0.0]]),
+        },
+    )
+    wrapper.env = SimpleNamespace(unwrapped=task)
+    wrapper._process_action = lambda action: torch.tensor([[0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
+    record = wrapper.capture_feedback(torch.ones((1, 7)), version="relspatial-action-v1")[0]
+    assert record.state.source_grasped is False
+    assert record.suggested_action == "move right in the world frame toward the source object"
+    assert wrapper.decision_index == [1]
 
 
 def test_reverse_kl_masks_tokens_and_only_student_gets_gradient():
