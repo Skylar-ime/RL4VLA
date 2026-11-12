@@ -141,3 +141,9 @@ conda run -n rlvla_env python -u SimplerEnv/simpler_env/train_ms3_ppo.py \
 - 发现 eval-only 旧逻辑的 W&B summary 只保留最后一批指标。现新增 `baseline/overall_*` 六集均值；并依据已归档 JSONL 回填上述五个 run 的云端 summary。验证代码通过 `py_compile`。之后运行 eval-only 会同时记录批次曲线和全评估集均值。
 - 同一问题也存在训练期：旧训练循环每次只评估一个并行 batch，未使用 `eval_episodes=6`。`eval_over_episodes` 现按配置评估并聚合固定 episode；`NUM_ENVS=2` 时每次 train/test checkpoint 评估各 6 集，`NUM_ENVS>=6` 时至少评估一个完整并行 batch。新增 mock 测试验证分批 episode IDs 和均值，不启动 GPU。
 - W&B SDK 不会自动上传 run 目录中新写入的 JSONL，故 eval-only 现显式 `wandb.save(..., policy="now")`。在线 2-episode artifact smoke run `7b45gele` 已由 API 核验 `finished`，云端 `eval_only.jsonl` 大小 `307 B`，summary 含总体均值；完整六集归档已落本地，逐集上传路径由该 smoke 验证。
+
+## 2026-11-12 当前版本六集评估复核
+
+- 在上述四个 seed 0 / 160-step checkpoint 与 warm-up 上，按相同 `PutOnPlateInScene25Main-v3` test episode `0..5`、冻结策略重新评估；结果仍是 warm-up `0/6`、PPO `1/6`、correct SDPO `4/6`、shuffled SDPO `1/6`、none SDPO `2/6`。W&B API 核实五个 run 均为 `finished`，且每个云端 run 都有 `eval_only.jsonl`（921 B）：warm-up `bknc4sip`、PPO `0lgozlos`、correct `tfkgli85`、shuffled `g8qvuqqy`、none `ie45uvxx`。
+- 这是同一训练 seed、每组 6 个固定测试 episode 的探索性结果；当前不能判定反馈带来的因果改进。pytest 模块缺失（`python -m pytest` 报 `No module named pytest`），但测试文件中的 12 个 `test_*` 函数已在 `rlvla_env` 中直接执行并全部通过。
+- 后续三 seed、每组 480 environment steps 的对照矩阵尚未运行。按计划先等待训练预算确认；不据此启动长时间训练。
