@@ -39,6 +39,27 @@ def audit(paths, threshold):
     return counts
 
 
+def audit_close_suggestions(paths):
+    counts = defaultdict(lambda: [0, 0])
+    for path in paths:
+        episodes = defaultdict(list)
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                record = json.loads(line)
+                episodes[record["episode_id"]].append(record)
+        for records in episodes.values():
+            records.sort(key=lambda record: record["decision_index"])
+            for current, following in zip(records, records[1:]):
+                if following["decision_index"] != current["decision_index"] + 1:
+                    continue
+                if not current["suggested_action"].startswith("close the gripper"):
+                    continue
+                judgment = current["action_judgment"]
+                counts[judgment][0] += 1
+                counts[judgment][1] += following["source_grasped"] is True
+    return counts
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("experiments/sdpo-v1/training_offline"))
@@ -57,6 +78,8 @@ def main():
             print(f"  {judgment}, grasped={grasped}: {improved}/{count} "
                   f"improved ({improved / count:.3f}), mean delta {total_delta / count:.5f} m"
                   + (f", new grasps {grasp_events}/{count}" if not grasped else ""))
+        for judgment, (count, grasp_events) in sorted(audit_close_suggestions(paths).items()):
+            print(f"  close suggestion, {judgment}: {grasp_events}/{count} new grasps")
 
 
 if __name__ == "__main__":
