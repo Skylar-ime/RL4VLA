@@ -1,7 +1,9 @@
 import json
 import math
 
-from scripts.audit_sdpo_v1_feedback_transitions import audit, audit_close_suggestions
+from scripts.audit_sdpo_v1_feedback_transitions import (
+    audit, audit_close_suggestions, audit_grasp_onset_distances,
+)
 
 
 def test_audit_matches_next_decision_and_separates_grasp_state(tmp_path):
@@ -46,3 +48,18 @@ def test_audit_close_suggestions_counts_following_grasps(tmp_path):
     path.write_text("".join(json.dumps(record) + "\n" for record in records))
 
     assert audit_close_suggestions([path]) == {"aligned": [1, 1], "not aligned": [1, 0]}
+
+
+def test_audit_grasp_onset_distance_uses_pre_action_state(tmp_path):
+    records = [
+        dict(episode_id=0, decision_index=0, source_grasped=False,
+             source_position=[0.04, 0.0, 0.0], gripper_position=[0.0, 0.0, 0.0]),
+        dict(episode_id=0, decision_index=1, source_grasped=True,
+             source_position=[0.01, 0.0, 0.0], gripper_position=[0.0, 0.0, 0.0]),
+        dict(episode_id=1, decision_index=0, source_grasped=False,
+             source_position=[0.02, 0.0, 0.0], gripper_position=[0.0, 0.0, 0.0]),
+    ]
+    path = tmp_path / "feedback.jsonl"
+    path.write_text("".join(json.dumps(record) + "\n" for record in records))
+
+    assert audit_grasp_onset_distances([path]) == [0.04]

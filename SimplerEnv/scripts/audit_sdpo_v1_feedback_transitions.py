@@ -5,6 +5,7 @@ import json
 import math
 from collections import defaultdict
 from pathlib import Path
+from statistics import median
 
 
 def audit(paths, threshold):
@@ -60,6 +61,27 @@ def audit_close_suggestions(paths):
     return counts
 
 
+def audit_grasp_onset_distances(paths):
+    distances = []
+    for path in paths:
+        episodes = defaultdict(list)
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                record = json.loads(line)
+                episodes[record["episode_id"]].append(record)
+        for records in episodes.values():
+            records.sort(key=lambda record: record["decision_index"])
+            for current, following in zip(records, records[1:]):
+                if following["decision_index"] != current["decision_index"] + 1:
+                    continue
+                if current["source_grasped"] is not False or following["source_grasped"] is not True:
+                    continue
+                if current["source_position"] is None or current["gripper_position"] is None:
+                    continue
+                distances.append(math.dist(current["source_position"], current["gripper_position"]))
+    return distances
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("experiments/sdpo-v1/training_offline"))
@@ -80,6 +102,11 @@ def main():
                   + (f", new grasps {grasp_events}/{count}" if not grasped else ""))
         for judgment, (count, grasp_events) in sorted(audit_close_suggestions(paths).items()):
             print(f"  close suggestion, {judgment}: {grasp_events}/{count} new grasps")
+        distances = audit_grasp_onset_distances(paths)
+        if distances:
+            print(f"  grasp onsets: {len(distances)}, under 0.03 m: "
+                  f"{sum(distance < 0.03 for distance in distances)}, "
+                  f"median centre distance: {median(distances):.4f} m")
 
 
 if __name__ == "__main__":
