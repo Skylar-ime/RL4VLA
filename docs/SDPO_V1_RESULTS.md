@@ -47,6 +47,7 @@
 - W&B 训练与评测均以 offline run 完整保存。2026-11-13 再次调用官方 `api.wandb.ai` 验证凭据仍返回 `AuthenticationError`；本机通过代理、绕过代理以及 robot 直接访问该端点均得到 HTTP `403`。**没有证据证明这些 run 已上传云端**。网络／认证修复后应逐 run 同步并通过 W&B API 核验，不依赖 CLI 的 `.synced` 标记。
 - 8 个训练 offline run（不含大型 checkpoint）已复制到本机 `experiments/sdpo-v1/training_offline/`，含 90 份 SDPO 反馈归档；8 个 `run-*.wandb` 文件与 robot 原件逐文件 SHA-256 一致。25 个评测 offline run 原本就在本机 `experiments/sdpo-v1/evaluation/`。完整 checkpoint 仍只保留在 robot，避免填满本机磁盘。
 - 当前观察是机制与反馈效果的负面证据；不建议直接追加大规模 seed 或 OOD 实验。下一轮应先固定评测协议，检查教师在正确反馈下的动作分布、启发式建议的实际有效率及训练学习率／EMA 稳定性，再做单因素消融。
+- 现有训练反馈 JSONL 保存了状态、建议和解码后的平移动作，但没有持久化同一决策的正常观测图像、原始 action token IDs 及行为 log-prob；这些只在在线 rollout buffer 中存在。因而**不能**从当前归档精确重算历史决策的学生／EMA 教师分布。下面的诊断须先采集新的、时间对齐的只读校准样本，不得声称重放了旧 rollout。
 
 训练 W&B run ID：PPO seed0/1 为 `fwgvbh6z`、`fd07lbp8`；旧版 RelSpatial SDPO 为 `vpeb8ep1`、`d05g0msp`；正确 v1 SDPO 为 `0b7ctuqb`、`kfds90ff`；打乱 v1 SDPO 为 `vemil9or`、`ktbfankm`。这些 ID 当前只对应离线产物，不应称为云端链接。
 
@@ -58,3 +59,7 @@ conda run -n rlvla_env wandb sync --include-synced \
   experiments/sdpo-v1/training_offline/v1-*/wandb/offline-run-* \
   experiments/sdpo-v1/evaluation/*/wandb/offline-run-*
 ```
+
+## 待确认的只读诊断方案
+
+此方案尚未执行，也不追加训练。用本机一张 4090、最多 `200` 个环境交互步，分别从 warm-up 和 v1 seed0 最终学生采集各 `100` 个决策：压缩保存正常图像、指令、原始 action token IDs、行为 log-prob、决策时刻状态与反馈、执行后状态和 episode 边界。先验证启发式的 `aligned` 判断是否与实际目标距离缩短、抓持建立相关；对无法判定的接触／释放阶段保留 `unknown`，不强行标对错。随后在固定的同一批图像和原始动作前缀上，对 v1 的 seed0/1、800/2400 步 checkpoint 比较学生正常输入与同一 EMA 教师在正确／打乱／无反馈三种输入下的动作分布、几何方向代理分数和 KL；代理分数不是任务成功率。只有确认教师得到更合理的分布，才提出学习率或 EMA 的单因素小规模训练预算；否则先修反馈或教师条件化。采样、评分和存档均不修改模型参数；开始前需另行确认本方案。
