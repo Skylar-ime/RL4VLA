@@ -26,5 +26,6 @@ def test_audit_matches_next_decision_and_separates_grasp_state(tmp_path):
 
     assert result[("aligned", False)][:2] == [1, 1]
     assert math.isclose(result[("aligned", False)][2], 0.2)
+    assert result[("aligned", False)][3] == 1
     assert result[("opposed", True)][:2] == [1, 0]
     assert math.isclose(result[("opposed", True)][2], -0.1)

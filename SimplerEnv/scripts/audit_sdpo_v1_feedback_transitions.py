@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def audit(paths, threshold):
-    counts = defaultdict(lambda: [0, 0, 0.0])
+    counts = defaultdict(lambda: [0, 0, 0.0, 0])
     for path in paths:
         episodes = defaultdict(list)
         with path.open(encoding="utf-8") as handle:
@@ -34,6 +34,8 @@ def audit(paths, threshold):
                 counts[key][0] += 1
                 counts[key][1] += delta > threshold
                 counts[key][2] += delta
+                if not current["source_grasped"]:
+                    counts[key][3] += following["source_grasped"] is True
     return counts
 
 
@@ -50,10 +52,11 @@ def main():
         if len(paths) != 15:
             raise ValueError(f"seed {seed}: expected 15 feedback archives, got {len(paths)}")
         print(f"seed {seed}")
-        for (judgment, grasped), (count, improved, total_delta) in sorted(
+        for (judgment, grasped), (count, improved, total_delta, grasp_events) in sorted(
                 audit(paths, args.threshold).items()):
             print(f"  {judgment}, grasped={grasped}: {improved}/{count} "
-                  f"improved ({improved / count:.3f}), mean delta {total_delta / count:.5f} m")
+                  f"improved ({improved / count:.3f}), mean delta {total_delta / count:.5f} m"
+                  + (f", new grasps {grasp_events}/{count}" if not grasped else ""))
 
 
 if __name__ == "__main__":
