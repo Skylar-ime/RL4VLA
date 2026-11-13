@@ -2,6 +2,8 @@
 
 ## SDPO RelSpatial Action Feedback v1 (`ex/1111-v1`)
 
+Completed 2400-step, two-seed results and limitations: [`docs/SDPO_V1_RESULTS.md`](docs/SDPO_V1_RESULTS.md). Under this protocol, correct v1 SDPO reached `0/60` successes at the final checkpoint and did not outperform shuffled v1 feedback. Do not scale up before diagnosing the feedback-conditioned teacher and training stability.
+
 The earlier `ex/1111` RelSpatial experiment remains unchanged: its teacher reads decision-time positions, grasp and gripper state; its student never reads privileged feedback. The 480-step, three-seed result is in [`docs/SDPO_FIRST_RUN.md`](docs/SDPO_FIRST_RUN.md). It did not show a consistent advantage over PPO or the shuffled/none controls.
 
 This branch adds an opt-in `--sdpo-feedback-version relspatial-action-v1`. After sampling an action and before executing it, the program builds a geometric next-action suggestion and compares the sampled displacement or gripper command with that suggestion. It uses the **current** selected-object grasp test, not the task's episode-accumulated grasp flag. World-frame offsets are rotated into the robot-root frame before comparing with OpenVLA action deltas. A missing state or transform produces `unknown`; close to a held object's target, release is not asserted without support evidence. This is a heuristic critique of the sampled action, not an execution-outcome label, a proof of optimal action, or the ROAD-VLA advantage-logit method. The original `relspatial-v2` option remains the default and produces the old records.

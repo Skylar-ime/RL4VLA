@@ -2,6 +2,7 @@
 import argparse
 import ast
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -50,6 +51,12 @@ def main() -> None:
         expected_feedback = 0.0 if "-ppo-" in name else 1.0
         if any(episode["feedback/effective_ratio"] != expected_feedback for episode in episodes):
             raise ValueError(f"{name}: unexpected feedback availability")
+        for episode in episodes:
+            gap = (episode["time/episode_seconds"] - episode["time/rollout_seconds"]
+                   - episode["time/update_seconds"])
+            if gap < -1:
+                print(f"Warning: inconsistent timing in {name} episode {episode['episode_index']}: "
+                      f"episode time is {-gap:.1f}s shorter than rollout plus update", file=sys.stderr)
 
         def total(key: str) -> float:
             return sum(float(episode[key]) for episode in episodes)
