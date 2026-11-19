@@ -128,6 +128,15 @@ def test_external_feedback_rejects_missing_fields():
         raise AssertionError("Incomplete correction accepted")
 
 
+def test_external_feedback_accepts_exact_json_code_fence():
+    correction = {field: "unknown" for field in FIELDS}
+    correction.update(phase="approach_source", next_subtask="approach carrot",
+                      ee_direction_root="positive x", retrospective_correction="approach first",
+                      retrospective_direction_root="positive x")
+    content = "```json\n" + json.dumps(correction) + "\n```"
+    assert parse_correction(content)["phase"] == "approach_source"
+
+
 def test_external_feedback_rejects_vacuous_guidance():
     try:
         parse_correction(json.dumps({field: "unknown" for field in FIELDS}))

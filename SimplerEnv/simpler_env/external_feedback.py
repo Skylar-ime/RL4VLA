@@ -109,6 +109,9 @@ def _jpeg_bytes(image: Any) -> bytes:
 
 
 def parse_correction(content: str) -> dict[str, str]:
+    content = content.strip()
+    if content.startswith("```json\n") and content.endswith("\n```"):
+        content = content[len("```json\n"):-len("\n```")]
     try:
         result = json.loads(content)
     except json.JSONDecodeError as error:
@@ -398,7 +401,20 @@ class ExternalFeedbackClient:
         original_root = None if original_world is None else world_to_root(
             original_world, outcome.root_quaternion_wxyz,
         )
+        verified_facts = (
+            f"Simulator facts override visual guesses: task_success={outcome.task_success}; "
+            f"source_grasped_before={outcome.before.source_grasped}; "
+            f"source_grasped_after={outcome.after.source_grasped}; "
+            f"executed_gripper={'OPEN' if action_values[6] > 0 else 'CLOSE'}; "
+            f"source={outcome.after.source_name or outcome.before.source_name}. "
+            "If task_success is false, never say the task is complete or the source is placed. "
+            "If source_grasped_after is false, never use transport_to_target, release_on_target, or verify_completion; "
+            "the next subtask must approach or grasp the source. "
+            "For a known ungrasped source, fill all original-decision correction fields with concrete guidance. "
+            "Return every required JSON field, without Markdown fences.\n"
+        )
         prompt = (
+            verified_facts +
             "Task instruction: " + instruction + "\n"
             "These are simulator observations from one action, not an action label. "
             "Image 1 is before the student action; image 2 is after it. "
@@ -467,7 +483,7 @@ class ExternalFeedbackClient:
                 if attempt == 3:
                     raise
                 payload["messages"][0]["content"][0]["text"] = (
-                    prompt + "\nPrevious answer was invalid: " + content[:1500]
+                    verified_facts + prompt + "\nPrevious answer was invalid: " + content[:1500]
                     + "\nValidation error: " + str(error) + "\nReturn corrected JSON only."
                 )
         def section(fields):
