@@ -14,7 +14,7 @@ cd "$HOME/project/RL4VLA"
 export PYTHONNOUSERSITE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH="SimplerEnv:ManiSkill:openvla${PYTHONPATH:+:${PYTHONPATH}}"
 export MS_ASSET_DIR="${MS_ASSET_DIR:-$HOME/maniskill-assets}"
-export VLA_PATH="${VLA_PATH:-$HOME/.cache/huggingface/hub/models--gen-robot--openvla-7b-rlvla-warmup/snapshots/735fd5d1f4472c4c9f3f998f0e89aa641af5ad03}"
+export VLA_PATH="${VLA_PATH:-$HOME/hf-cache/models/openvla-7b-rlvla-warmup}"
 export EXTERNAL_FEEDBACK_MODEL="${EXTERNAL_FEEDBACK_MODEL:-Qwen/Qwen2.5-VL-3B-Instruct}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
@@ -34,6 +34,7 @@ checkpoint_steps="${CHECKPOINT_STEPS:-480,2400,5000,10000}"
 case "$arm" in
   sdpo)
     : "${EXTERNAL_FEEDBACK_URL:?Set endpoint reachable from H800 compute node}"
+    export EXTERNAL_FEEDBACK_API_KEY="$(cat "$HOME/.config/rlvla/qwen_v2.key")"
     arm_args=(--alg-name sdpo --sdpo-feedback-mode correct
       --sdpo-feedback-version multimodal-correction-v2
       --external-feedback-url "$EXTERNAL_FEEDBACK_URL"

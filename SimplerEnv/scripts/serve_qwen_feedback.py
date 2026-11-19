@@ -114,8 +114,11 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     args = parser.parse_args()
+    api_key = os.environ.get("QWEN_SERVER_API_KEY", "")
+    if args.host not in {"127.0.0.1", "::1", "localhost"} and not api_key:
+        raise ValueError("Non-loopback feedback service requires QWEN_SERVER_API_KEY")
     model = QwenFeedbackModel(args.model_path, args.device)
-    handler = make_handler(model, args.served_model_name, os.environ.get("QWEN_SERVER_API_KEY", ""))
+    handler = make_handler(model, args.served_model_name, api_key)
     print(f"Qwen feedback ready on {args.host}:{args.port} ({args.device})", flush=True)
     HTTPServer((args.host, args.port), handler).serve_forever()
 

@@ -16,7 +16,7 @@
 
 ## 资源与执行
 
-robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2` Git 修订；正式训练只申请 **1 张 H800**。本机 **1 张 RTX 4090** 托管 Qwen2.5-VL-3B-Instruct 反馈服务，经鉴权的 SSH 受限隧道供 H800 作业调用。训练入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_h800.sbatch`，默认 `NUM_ENVS=8`、`BUFFER_INFERBATCH=8`，提高 H800 rollout 与 OpenVLA 前向批量；外部反馈仍逐决策更新。先串行跑 SDPO，再在相同 H800 资源配置下跑 PPO；两组不能同时争抢 H800。以端到端环境动作步/小时、反馈延迟、优化器步数、GPU 占用和 OOM 为依据调节并行环境数。逐反馈更新的依赖会让 H800 在等待本地 Qwen 时空闲；测量这部分空闲，不以虚假的 100% 利用率作为目标。保持最多两张 GPU 同时占用。
+robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2` Git 修订；正式训练只申请 **1 张 H800**。本机 **1 张 RTX 4090** 托管 Qwen2.5-VL-3B-Instruct 反馈服务，仅绑定本机私网地址并使用随机 Bearer key 供 H800 作业调用；计算节点到该地址的连通性已用 GPU-free Slurm 作业验证。训练入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_h800.sbatch`，默认 `NUM_ENVS=8`、`BUFFER_INFERBATCH=8`，提高 H800 rollout 与 OpenVLA 前向批量；外部反馈仍逐决策更新。先串行跑 SDPO，再在相同 H800 资源配置下跑 PPO；两组不能同时争抢 H800。以端到端环境动作步/小时、反馈延迟、优化器步数、GPU 占用和 OOM 为依据调节并行环境数。逐反馈更新的依赖会让 H800 在等待本地 Qwen 时空闲；测量这部分空闲，不以虚假的 100% 利用率作为目标。保持最多两张 GPU 同时占用。
 
 本机固定评测入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh`。验证集传 `EVAL_EPISODE_START=0 EVAL_EPISODES=60`，最终测试集传 `EVAL_EPISODE_START=60 EVAL_EPISODES=100 EVAL_NUM_ENVS=5`；使用不同 episode ID，后者不得在中途评测或提示词调试时运行。每组每个 checkpoint 单独指定唯一 `EVAL_LABEL` 和 `VLA_LOAD_PATH`。训练关闭内置评测；累计训练墙钟和优化器步数写入 W&B 及 `environment_steps.json`，避免把固定评测时间算进训练速度。
 
@@ -24,4 +24,4 @@ robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2
 
 ## 当前状态
 
-2026-11-19：方案已固定。已补充 3B 服务默认模型、H800 单卡 10,000 步入口、精确 checkpoint 边界、固定评测入口和累计训练墙钟／优化器步数记录。训练前尚需完成 3B 权重下载、双图服务 smoke、SSH 隧道和 H800 单卡 smoke。历史 warm-up 在先前 30 集协议下成功 14/30；本研究的共同 60 集基线需重新测量。
+2026-11-19：方案已固定。3B 权重已下载，本机 4090 反馈服务已加载；robot Git 与本机均在 `ex/v2` commit `c89204a`，GPU-free Slurm 作业 `17563` 证明计算节点可访问本机私网。首个 H800 入口试跑 `17565` 在加载模型前因脚本误用本机 warm-up 路径失败，未执行环境动作或更新；已将 robot 默认路径修为 `$HOME/hf-cache/models/openvla-7b-rlvla-warmup`，待重新同步后再试。历史 warm-up 在先前 30 集协议下成功 14/30；本研究的共同 60 集基线正在评测。
