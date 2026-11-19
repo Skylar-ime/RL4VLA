@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 : "${EVAL_LABEL:?Set unique EVAL_LABEL}"
 : "${EVAL_EPISODES:=60}"
 : "${EVAL_EPISODE_START:=0}"
+: "${EVAL_EPISODE_MANIFEST:=SimplerEnv/scripts/sdpo_v2_eval_episodes.json}"
+: "${EVAL_EPISODE_SPLIT:=validation}"
 : "${EVAL_NUM_ENVS:=6}"
 : "${VLA_LOAD_PATH:=}"
 : "${WANDB_MODE:=offline}"
@@ -32,6 +34,7 @@ WANDB_DIR="$run_dir" conda run --no-capture-output -n rlvla_env python -u \
     --seed 0 --num-envs "$EVAL_NUM_ENVS" --episode-len 80 \
     --eval-only --eval-episodes "$EVAL_EPISODES" \
     --eval-episode-start "$EVAL_EPISODE_START" --eval-obj-set test \
+    --eval-episode-manifest "$EVAL_EPISODE_MANIFEST" --eval-episode-split "$EVAL_EPISODE_SPLIT" \
     --name "$EVAL_LABEL" --no-save-render > "$run_dir/eval.log" 2>&1
 
 result=$(find "$run_dir" -name eval_only.jsonl -type f -print -quit)

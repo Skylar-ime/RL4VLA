@@ -58,6 +58,8 @@ class Args:
     eval_episodes: int = 6
     eval_obj_set: str = "test"
     eval_episode_start: int = 0
+    eval_episode_manifest: str = ""
+    eval_episode_split: str = "validation"
 
     # buffer
     buffer_inferbatch: int = 32
@@ -123,6 +125,21 @@ def next_rollout_length(completed_steps: int, steps_max: int, num_envs: int,
     if rollout_length < 1:
         raise ValueError("Checkpoint boundary cannot be reached by the allocated environments")
     return rollout_length
+
+
+def load_eval_episode_ids(manifest_path: str, split: str, expected_count: int,
+                          env_id: str, obj_set: str, episode_start: int) -> tuple[int, ...]:
+    if not manifest_path:
+        return tuple(range(episode_start, episode_start + expected_count))
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if manifest.get("env_id") != env_id or manifest.get("obj_set") != obj_set:
+        raise ValueError("Evaluation manifest task or object set does not match")
+    episode_ids = manifest.get(split)
+    if (not isinstance(episode_ids, list) or len(episode_ids) != expected_count
+            or any(type(episode_id) is not int or episode_id < 0 for episode_id in episode_ids)
+            or len(set(episode_ids)) != len(episode_ids)):
+        raise ValueError("Evaluation manifest has invalid or duplicate episode IDs")
+    return tuple(episode_ids)
 
 
 class Runner:
@@ -324,16 +341,19 @@ class Runner:
         obj_set: str,
         episode_offset: int = 0,
         return_episode_stats: bool = False,
+        selected_episode_ids: tuple[int, ...] | None = None,
     ) -> dict | tuple[dict, list[dict]]:
         self.policy.prep_rollout()
         env_infos = defaultdict(lambda: [])
         cpu_rng_state = torch.get_rng_state()
         cuda_rng_states = torch.cuda.get_rng_state_all()
-        torch.manual_seed(self.args.seed + 100000 + episode_offset)
+        if selected_episode_ids is None:
+            selected_episode_ids = tuple(range(episode_offset, episode_offset + self.args.num_envs))
+        if len(selected_episode_ids) != self.args.num_envs:
+            raise ValueError("Evaluation batch must contain one episode ID per environment")
+        torch.manual_seed(self.args.seed + 100000 + selected_episode_ids[0])
 
-        episode_ids = torch.arange(
-            episode_offset, episode_offset + self.args.num_envs, device=self.env.env.unwrapped.device
-        )
+        episode_ids = torch.as_tensor(selected_episode_ids, device=self.env.env.unwrapped.device)
         obs_img, instruction, info = self.env.reset(obj_set=obj_set, episode_ids=episode_ids)
         completed = torch.zeros(self.args.num_envs, dtype=torch.bool, device=self.device)
         ever_grasped = torch.zeros_like(completed)
@@ -433,23 +453,29 @@ class Runner:
             raise ValueError("eval_obj_set must be 'train' or 'test'")
         if self.args.eval_episode_start < 0:
             raise ValueError("eval_episode_start must be nonnegative")
+        episode_ids = load_eval_episode_ids(
+            self.args.eval_episode_manifest, self.args.eval_episode_split, self.args.eval_episodes,
+            self.args.env_id, self.args.eval_obj_set, self.args.eval_episode_start,
+        )
 
         results_path = self.save_dir / "eval_only.jsonl"
         self.policy.prep_rollout()
         batch_stats = defaultdict(list)
         with results_path.open("w", encoding="utf-8") as handle:
             for batch_index in range(self.args.eval_episodes // self.args.num_envs):
-                episode_offset = self.args.eval_episode_start + batch_index * self.args.num_envs
+                batch_episode_ids = episode_ids[
+                    batch_index * self.args.num_envs:(batch_index + 1) * self.args.num_envs
+                ]
                 stats, episode_stats = self.eval(
                     self.args.eval_obj_set,
-                    episode_offset=episode_offset,
                     return_episode_stats=True,
+                    selected_episode_ids=batch_episode_ids,
                 )
                 for key, value in stats.items():
                     batch_stats[key].append(value)
                 record = {
                     "obj_set": self.args.eval_obj_set,
-                    "episode_ids": list(range(episode_offset, episode_offset + self.args.num_envs)),
+                    "episode_ids": list(batch_episode_ids),
                     "episode_stats": episode_stats,
                     **stats,
                 }

@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from transformers import BatchFeature
 
@@ -7,7 +9,7 @@ from simpler_env.feedback import build_action_guidance_feedback, build_action_ou
 from simpler_env.env.simpler_wrapper import completed_episode_info
 from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy, OpenVLAPPO
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
-from simpler_env.train_ms3_ppo import Runner, next_rollout_length, parse_checkpoint_steps
+from simpler_env.train_ms3_ppo import Runner, load_eval_episode_ids, next_rollout_length, parse_checkpoint_steps
 from simpler_env.utils.replay_buffer import SeparatedReplayBuffer
 
 
@@ -25,6 +27,23 @@ def test_exact_environment_step_boundaries_keep_eighty_step_episode_cap():
     assert checkpoints == [480, 2400, 5000, 10000]
     assert 80 in rollout_lengths and 20 in rollout_lengths
     assert sum(rollout_lengths) * 2 == 10000
+
+
+def test_stratified_evaluation_manifest_covers_test_objects_and_backgrounds():
+    manifest_path = Path(__file__).resolve().parents[1] / "scripts/sdpo_v2_eval_episodes.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    episodes_per_stratum = manifest["position_config_count"] * manifest["orientation_count"]
+    validation = load_eval_episode_ids(
+        str(manifest_path), "validation", 60, manifest["env_id"], "test", 0,
+    )
+    final_test = load_eval_episode_ids(
+        str(manifest_path), "final_test", 100, manifest["env_id"], "test", 60,
+    )
+    assert not set(validation) & set(final_test)
+    for split in (validation, final_test):
+        strata = {episode_id // episodes_per_stratum for episode_id in split}
+        assert strata == set(range(9 * 5))
+    assert load_eval_episode_ids("", "validation", 3, manifest["env_id"], "test", 4) == (4, 5, 6)
 
 
 def test_rel_spatial_feedback_uses_current_positions_and_explicit_unknowns():
@@ -390,6 +409,30 @@ def test_training_evaluation_aggregates_all_requested_episode_batches():
 
     assert calls == [("test", 0), ("test", 2), ("test", 4)]
     assert stats == {"success": 1.0}
+
+
+def test_eval_only_preserves_stratified_episode_ids(tmp_path, monkeypatch):
+    manifest_path = Path(__file__).resolve().parents[1] / "scripts/sdpo_v2_eval_episodes.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runner = object.__new__(Runner)
+    runner.args = SimpleNamespace(
+        eval_episodes=60, num_envs=6, eval_obj_set="test", eval_episode_start=0,
+        eval_episode_manifest=str(manifest_path), eval_episode_split="validation",
+        env_id=manifest["env_id"],
+    )
+    runner.save_dir = tmp_path
+    runner.policy = SimpleNamespace(prep_rollout=lambda: None)
+    runner.eval = lambda obj_set, return_episode_stats, selected_episode_ids: (
+        {"success": 0.0}, [{"episode_id": episode_id} for episode_id in selected_episode_ids],
+    )
+    monkeypatch.setattr("simpler_env.train_ms3_ppo.wandb.log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("simpler_env.train_ms3_ppo.wandb.save", lambda *args, **kwargs: None)
+
+    runner.run_eval_only()
+
+    batches = [json.loads(line) for line in (tmp_path / "eval_only.jsonl").read_text().splitlines()]
+    assert [episode_id for batch in batches for episode_id in batch["episode_ids"]] == manifest["validation"]
+    assert all(len(batch["episode_stats"]) == 6 for batch in batches)
 
 
 def test_eval_transport_metrics_use_live_grasp_not_accumulated_episode_flag():

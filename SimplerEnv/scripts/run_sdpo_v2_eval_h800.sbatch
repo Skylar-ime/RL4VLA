@@ -16,7 +16,8 @@ export MS_ASSET_DIR="${MS_ASSET_DIR:-$HOME/maniskill-assets}"
 export VLA_PATH="${VLA_PATH:-$HOME/hf-cache/models/openvla-7b-rlvla-warmup}"
 export EVAL_ROOT="${EVAL_ROOT:-experiments/sdpo-v2-10000/evaluation}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
-export EVAL_EPISODE_START=0 EVAL_EPISODES=60 EVAL_NUM_ENVS=6
+export EVAL_EPISODE_MANIFEST=SimplerEnv/scripts/sdpo_v2_eval_episodes.json
+export EVAL_EPISODE_SPLIT=validation EVAL_EPISODES=60 EVAL_NUM_ENVS=6
 
 arm="${1:?Usage: sbatch $0 ppo|sdpo}"
 if [[ "$arm" != ppo && "$arm" != sdpo ]]; then
@@ -30,7 +31,7 @@ if [[ ! -d "$train_run/glob" ]]; then
 fi
 
 if [[ "$arm" == ppo ]]; then
-    EVAL_LABEL=warmup-validation-60-h800 VLA_LOAD_PATH='' \
+    EVAL_LABEL=warmup-stratified-validation-60-h800 VLA_LOAD_PATH='' \
         bash SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh
 fi
 
@@ -41,6 +42,6 @@ for steps in 480 2400 5000 10000; do
         echo "Incomplete checkpoint: $checkpoint_dir" >&2
         exit 1
     fi
-    EVAL_LABEL="$arm-$checkpoint-validation-60-h800" VLA_LOAD_PATH="$checkpoint_dir" \
+    EVAL_LABEL="$arm-$checkpoint-stratified-validation-60-h800" VLA_LOAD_PATH="$checkpoint_dir" \
         bash SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh
 done

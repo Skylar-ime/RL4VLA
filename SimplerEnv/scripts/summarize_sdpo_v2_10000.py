@@ -12,10 +12,9 @@ import matplotlib.pyplot as plt
 
 
 CHECKPOINT_STEPS = (480, 2400, 5000, 10000)
-EPISODE_IDS = tuple(range(60))
 
 
-def read_episodes(eval_root: Path, label: str) -> dict[int, dict]:
+def read_episodes(eval_root: Path, label: str, expected_episode_ids: tuple[int, ...]) -> dict[int, dict]:
     files = list((eval_root / label / "wandb").glob("offline-run-*/files/eval_only.jsonl"))
     if len(files) != 1:
         raise ValueError(f"Expected one offline evaluation for {label}, found {len(files)}")
@@ -30,7 +29,7 @@ def read_episodes(eval_root: Path, label: str) -> dict[int, dict]:
                 if episode_id in episodes:
                     raise ValueError(f"Duplicate episode {episode_id} in {label}")
                 episodes[episode_id] = episode
-    if tuple(sorted(episodes)) != EPISODE_IDS:
+    if tuple(sorted(episodes)) != tuple(sorted(expected_episode_ids)):
         raise ValueError(f"Evaluation episode IDs are incomplete or changed: {label}")
     required = {
         "success", "is_src_obj_grasped", "consecutive_grasp", "first_grasp_step",
@@ -42,7 +41,7 @@ def read_episodes(eval_root: Path, label: str) -> dict[int, dict]:
 
 
 def summarize(arm: str, step: int, seconds: float, optimizer_steps: float,
-              episodes: dict[int, dict], baseline: dict[int, dict]) -> dict:
+              episodes: dict[int, dict], baseline: dict[int, dict], episode_ids: tuple[int, ...]) -> dict:
     success = sum(episode["success"] for episode in episodes.values())
     grasped = sum(episode["is_src_obj_grasped"] for episode in episodes.values())
     sustained = sum(episode["consecutive_grasp"] for episode in episodes.values())
@@ -53,9 +52,9 @@ def summarize(arm: str, step: int, seconds: float, optimizer_steps: float,
     distance_reductions = [episode["carried_target_distance_reduction_m"] for episode in episodes.values()
                            if episode["carried_target_distance_reduction_m"] is not None]
     gains = sum(episodes[episode_id]["success"] and not baseline[episode_id]["success"]
-                for episode_id in EPISODE_IDS)
+                for episode_id in episode_ids)
     losses = sum(not episodes[episode_id]["success"] and baseline[episode_id]["success"]
-                 for episode_id in EPISODE_IDS)
+                 for episode_id in episode_ids)
     return {
         "arm": arm,
         "environment_steps": step,
@@ -80,19 +79,24 @@ def summarize(arm: str, step: int, seconds: float, optimizer_steps: float,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eval-root", type=Path, required=True)
+    parser.add_argument("--episode-manifest", type=Path, required=True)
     parser.add_argument("--ppo-run", type=Path, required=True)
     parser.add_argument("--sdpo-run", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    baseline = read_episodes(args.eval_root, "warmup-validation-60-h800")
-    rows = [summarize("warmup", 0, 0.0, 0.0, baseline, baseline)]
+    manifest = json.loads(args.episode_manifest.read_text(encoding="utf-8"))
+    episode_ids = tuple(manifest["validation"])
+    if len(episode_ids) != 60 or len(set(episode_ids)) != 60:
+        raise ValueError("Validation manifest must contain 60 distinct episode IDs")
+    baseline = read_episodes(args.eval_root, "warmup-stratified-validation-60-h800", episode_ids)
+    rows = [summarize("warmup", 0, 0.0, 0.0, baseline, baseline, episode_ids)]
     for arm, train_run in (("ppo", args.ppo_run), ("sdpo", args.sdpo_run)):
         if train_run is None:
             continue
         previous_seconds = -1.0
         for step in CHECKPOINT_STEPS:
-            label = f"{arm}-step_{step:06d}-validation-60-h800"
+            label = f"{arm}-step_{step:06d}-stratified-validation-60-h800"
             metadata_path = train_run / "glob" / f"step_{step:06d}" / "environment_steps.json"
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             if metadata["environment_steps"] != step:
@@ -101,9 +105,9 @@ def main():
             if seconds <= previous_seconds:
                 raise ValueError(f"Non-increasing training wall time: {metadata_path}")
             previous_seconds = seconds
-            episodes = read_episodes(args.eval_root, label)
+            episodes = read_episodes(args.eval_root, label, episode_ids)
             rows.append(summarize(
-                arm, step, seconds, float(metadata["optimizer_steps_cumulative"]), episodes, baseline,
+                arm, step, seconds, float(metadata["optimizer_steps_cumulative"]), episodes, baseline, episode_ids,
             ))
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +136,7 @@ def main():
         axis.set(xlabel=label, ylabel="Success rate (%)", ylim=(0, 100))
         axis.grid(alpha=0.2)
         axis.legend()
-    figure.suptitle("Fixed test episodes 0–59; seed 0")
+    figure.suptitle("Stratified fixed test episodes; seed 0")
     figure.tight_layout()
     figure_path = args.output_dir / "validation_learning_curves.png"
     figure.savefig(figure_path, dpi=180)
