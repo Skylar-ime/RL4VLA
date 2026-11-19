@@ -3,12 +3,28 @@ import numpy as np
 from types import SimpleNamespace
 from transformers import BatchFeature
 
-from simpler_env.feedback import build_action_guidance_feedback, build_rel_spatial_feedback
+from simpler_env.feedback import build_action_guidance_feedback, build_action_outcome_feedback, build_rel_spatial_feedback
 from simpler_env.env.simpler_wrapper import completed_episode_info
-from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy
+from simpler_env.policies.openvla.openvla_train import OpenVLAPolicy, OpenVLAPPO
 from simpler_env.sdpo_distillation import reverse_kl_student_to_teacher
-from simpler_env.train_ms3_ppo import Runner
+from simpler_env.train_ms3_ppo import Runner, next_rollout_length, parse_checkpoint_steps
 from simpler_env.utils.replay_buffer import SeparatedReplayBuffer
+
+
+def test_exact_environment_step_boundaries_keep_eighty_step_episode_cap():
+    boundaries = parse_checkpoint_steps("480,2400,5000,10000", 10000, 2)
+    completed = 0
+    checkpoints = []
+    rollout_lengths = []
+    while completed < 10000:
+        length = next_rollout_length(completed, 10000, 2, 80, boundaries)
+        completed += length * 2
+        rollout_lengths.append(length)
+        if completed in boundaries:
+            checkpoints.append(completed)
+    assert checkpoints == [480, 2400, 5000, 10000]
+    assert 80 in rollout_lengths and 20 in rollout_lengths
+    assert sum(rollout_lengths) * 2 == 10000
 
 
 def test_rel_spatial_feedback_uses_current_positions_and_explicit_unknowns():
@@ -148,6 +164,179 @@ def test_v1_wrapper_reads_current_grasp_not_episode_history():
     assert wrapper.decision_index == [1]
 
 
+def test_outcome_feedback_reports_observations_without_action_quality_label():
+    before = build_rel_spatial_feedback(
+        episode_id=7, decision_index=2, source_name="object", target_name="plate",
+        source_position=[0.0, 0.0, 0.0], target_position=[0.2, 0.0, 0.0],
+        gripper_position=[0.0, 0.0, 0.1], source_grasped=False,
+    )
+    after = build_rel_spatial_feedback(
+        episode_id=7, decision_index=2, source_name="object", target_name="plate",
+        source_position=[0.0, 0.0, 0.002], target_position=[0.2, 0.0, 0.0],
+        gripper_position=[0.0, 0.0, 0.06], source_grasped=True,
+    )
+    record = build_action_outcome_feedback(
+        before, after, env_index=0, action_token_ids=[31800] * 7,
+        episode_done=True, task_success=False,
+    )
+    assert record.distance_change_m < 0
+    assert record.source_movement_m > 0
+    assert record.grasp_transition == "established"
+    assert "this alone does not establish action correctness" in record.text
+    assert "Task success at this step: false" in record.text
+    assert "Suggested next action" not in record.text
+    assert "aligned" not in record.text
+    assert record.to_dict()["action_token_ids"] == (31800,) * 7
+
+
+def test_outcome_feedback_marks_missing_measurements_unknown():
+    before = build_rel_spatial_feedback(
+        episode_id=7, decision_index=2, source_name=None, target_name=None,
+        source_position=None, target_position=None, gripper_position=None,
+    )
+    after = build_rel_spatial_feedback(
+        episode_id=7, decision_index=2, source_name=None, target_name=None,
+        source_position=None, target_position=None, gripper_position=None,
+    )
+    record = build_action_outcome_feedback(
+        before, after, env_index=0, action_token_ids=[31800] * 7,
+        episode_done=False, task_success=None,
+    )
+    assert record.distance_change_m is None
+    assert record.grasp_transition == "unknown"
+    assert "distance change is unknown" in record.text
+    assert "Task success at this step: unknown" in record.text
+
+
+def test_outcome_feedback_matches_parallel_actions_and_terminal_states():
+    from simpler_env.env.simpler_wrapper import SimlerWrapper
+
+    wrapper = object.__new__(SimlerWrapper)
+    wrapper.num_envs = 2
+    wrapper.episode_ids = [100, 200]
+    wrapper.decision_index = [3, 5]
+    positions = {
+        "extra_pos_carrot": torch.tensor([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]]),
+        "extra_pos_plate": torch.tensor([[0.1, 0.0, 0.0], [0.3, 0.0, 0.0]]),
+        "extra_pos_gripper": torch.tensor([[0.0, 0.0, 0.1], [0.2, 0.0, 0.1]]),
+    }
+    grasped = torch.tensor([False, True])
+    root_quaternions = torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]])
+    agent = SimpleNamespace(robot=SimpleNamespace(active_joints=[], pose=SimpleNamespace(q=root_quaternions)),
+                            is_grasping=lambda obj: grasped)
+    task = SimpleNamespace(
+        agent=agent, objs_carrot={"carrot": object()}, carrot_names=["carrot"],
+        model_db_carrot={"carrot": {"name": "carrot"}},
+        model_db_plate={"plate": {"name": "plate"}}, plate_names=["plate"],
+        select_carrot_ids=torch.tensor([0, 0]), select_plate_ids=torch.tensor([0, 0]),
+        episode_stats={}, extra_stats=positions,
+    )
+    wrapper.env = SimpleNamespace(unwrapped=task)
+
+    def execute(action):
+        positions["extra_pos_gripper"] = torch.tensor([[0.0, 0.0, 0.05], [0.2, 0.0, 0.1]])
+        grasped[:] = torch.tensor([True, False])
+        root_quaternions[:] = torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])
+        return None, None, torch.tensor([[True], [False]]), {"success": torch.tensor([True, False])}
+
+    wrapper.step = execute
+    actions = torch.tensor([[31800] * 7, [31900] * 7])
+    _, _, done, _, records = wrapper.step_with_outcome_feedback(actions, reset_after_step=True, include_contact=True)
+    assert done[:, 0].tolist() == [True, False]
+    assert [(record.before.episode_id, record.before.decision_index) for record in records] == [
+        ("100:reset0:env0", 3), ("200:reset0:env1", 5),
+    ]
+    assert [record.grasp_transition for record in records] == ["established", "lost"]
+    assert [record.task_success for record in records] == [True, False]
+    assert [record.rollout_interrupted for record in records] == [False, True]
+    assert [record.env_index for record in records] == [0, 1]
+    assert [record.action_token_ids for record in records] == [(31800,) * 7, (31900,) * 7]
+    assert [record.root_quaternion_wxyz for record in records] == [(1.0, 0.0, 0.0, 0.0)] * 2
+    assert wrapper.decision_index == [4, 6]
+
+
+def test_outcome_full_reset_updates_all_environments_after_one_finishes():
+    from simpler_env.env.simpler_wrapper import SimlerWrapper
+
+    wrapper = object.__new__(SimlerWrapper)
+    wrapper.num_envs = 2
+    wrapper.episode_ids = [100, 200]
+    wrapper.decision_index = [4, 6]
+    wrapper.reset_generation = 3
+    wrapper.reward_old = torch.tensor([[0.7], [0.9]])
+    task = SimpleNamespace(
+        device=torch.device("cpu"), _episode_seed=[100, 200],
+        get_language_instruction=lambda: ["new first", "new second"],
+    )
+
+    def reset(options):
+        assert options["obj_set"] == "train"
+        assert "env_idx" not in options
+        task._episode_seed = [300, 400]
+        return {"sensor_data": {"3rd_view_camera": {"rgb": torch.ones((2, 2, 2, 3))}}}, {}
+
+    wrapper.env = SimpleNamespace(unwrapped=task, reset=reset)
+    image, instruction, _ = wrapper.reset(obj_set="train")
+    assert image.dtype == torch.uint8
+    assert instruction == ["new first", "new second"]
+    assert wrapper.episode_ids == [300, 400]
+    assert wrapper.decision_index == [0, 0]
+    assert wrapper.reset_generation == 4
+    assert np.allclose(wrapper.reward_old[:, 0].tolist(), [0.0, 0.0])
+
+
+def test_outcome_sdpo_uses_original_actions_and_one_update_per_two_minibatches():
+    student_logits = torch.nn.Parameter(torch.tensor([0.5, -0.5]))
+    teacher_logits = torch.nn.Parameter(torch.tensor([-0.5, 0.5]), requires_grad=False)
+    seen = []
+    ema_updates = []
+
+    class CountingOptimizer(torch.optim.SGD):
+        def __init__(self):
+            super().__init__([student_logits], lr=0.1)
+            self.steps = 0
+
+        def step(self, closure=None):
+            self.steps += 1
+            return super().step(closure)
+
+    optimizer = CountingOptimizer()
+
+    def student_forward(observation, actions):
+        seen.append((actions.clone(), observation["task_description"]))
+        return student_logits.expand(actions.shape[0], actions.shape[1], 2)
+
+    def teacher_forward(observation, actions, feedback):
+        assert feedback == ["observed result"] * actions.shape[0]
+        assert torch.equal(actions, seen[-1][0])
+        return teacher_logits.expand(actions.shape[0], actions.shape[1], 2)
+
+    policy = SimpleNamespace(
+        tpdv={"device": torch.device("cpu")}, tpdv_vn={"device": torch.device("cpu")},
+        params_vla=[student_logits],
+        vla_optimizer=optimizer, evaluate_action_logits=student_forward,
+        evaluate_teacher_action_logits=teacher_forward,
+        update_teacher_ema=lambda rate: ema_updates.append(rate),
+    )
+    trainer = OpenVLAPPO(SimpleNamespace(
+        alg_entropy_coef=0.0, alg_gradient_accum=2, sdpo_feedback_mode="correct",
+        sdpo_ema_rate=0.01,
+    ), policy)
+    batch = (
+        np.zeros((2, 2, 2, 3), dtype=np.uint8), ["task one", "task two"],
+        np.array([[31800] * 7, [31900] * 7]), None, None, None, None, None,
+        [SimpleNamespace(text="observed result")] * 2,
+    )
+    first = trainer.train_sdpo_step(0, 2, batch)
+    assert first["optimizer_steps"] == 0.0
+    assert optimizer.steps == 0
+    second = trainer.train_sdpo_step(1, 2, batch)
+    assert second["optimizer_steps"] == 1.0
+    assert optimizer.steps == 1
+    assert ema_updates == [0.01]
+    assert teacher_logits.grad is None
+
+
 def test_reverse_kl_masks_tokens_and_only_student_gets_gradient():
     student = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]], requires_grad=True)
     teacher = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]], requires_grad=True)
@@ -285,6 +474,8 @@ def test_rollout_minibatches_keep_feedback_actions_and_joint_logprobs_aligned():
             masks=np.ones((2, 1), dtype=np.float32),
             feedback=records,
         )
+        if step == 0:
+            buffer.set_next_observation(np.array([[15], [21]], dtype=np.uint8), ["third", "second"])
 
     seen = set()
     for batch in buffer.feed_forward_generator(include_feedback=True):
@@ -293,8 +484,10 @@ def test_rollout_minibatches_keep_feedback_actions_and_joint_logprobs_aligned():
         for index, record in enumerate(feedback):
             step, env = map(int, record.text.split("-"))
             assert actions[index, 0] == 31744 + step * 2 + env
-            assert observations[index, 0] == (10 if env == 0 else 20) + step
-            assert instructions[index] == ("first" if env == 0 else "second")
+            expected_observation = (15 if env == 0 else 21) if step else (10 if env == 0 else 20)
+            expected_instruction = "third" if step and env == 0 else "first" if env == 0 else "second"
+            assert observations[index, 0] == expected_observation
+            assert instructions[index] == expected_instruction
             assert old_logprobs[index, 0] == -step * 2 - env - 0.5
             seen.add((step, env))
     assert seen == {(0, 0), (0, 1), (1, 0), (1, 1)}

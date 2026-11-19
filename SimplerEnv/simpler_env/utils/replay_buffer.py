@@ -12,6 +12,7 @@ class SeparatedReplayBuffer(object):
 
         self.obs = np.zeros((self.ep_len + 1, self.num_env, *obs_dim), dtype=np.uint8)
         self.instruction = [""] * self.num_env
+        self.instructions = [[""] * self.num_env for _ in range(self.ep_len)]
         self.value_preds = np.zeros((self.ep_len + 1, self.num_env, 1), dtype=np.float32)
         self.returns = np.zeros((self.ep_len, self.num_env, 1), dtype=np.float32)
         self.actions = np.zeros((self.ep_len, self.num_env, act_dim), dtype=np.int32)
@@ -26,6 +27,7 @@ class SeparatedReplayBuffer(object):
         self.step = 0
 
     def insert(self, obs, actions, action_log_probs, value_preds, rewards, masks, feedback=None):
+        self.instructions[self.step] = list(self.instruction)
         self.obs[self.step + 1] = obs.copy()
         self.actions[self.step] = actions.copy()
         self.action_log_probs[self.step] = action_log_probs.copy()
@@ -45,10 +47,16 @@ class SeparatedReplayBuffer(object):
 
     def warmup(self, obs, instruction):
         self.obs[0] = obs
-        self.instruction = instruction
+        self.instruction = list(instruction)
         self.masks[0] = 1.0
 
         self.step = 0
+
+    def set_next_observation(self, obs, instruction):
+        if len(instruction) != self.num_env:
+            raise ValueError("instruction batch size must match num_env")
+        self.obs[self.step] = obs.copy()
+        self.instruction = list(instruction)
 
     def endup(self, next_value):
         self.value_preds[-1] = next_value
@@ -123,6 +131,7 @@ class SeparatedReplayBuffer(object):
         action_logits = self.action_log_probs.reshape(-1, self.action_log_probs.shape[-1])
         advantages = self.advantages.reshape(-1, 1)
         feedback = np.asarray(self.feedback, dtype=object).reshape(-1)
+        instructions = np.asarray(self.instructions, dtype=object).reshape(-1)
 
         for indices in sampler:
             # obs size [T+1 N Dim]-->[T N Dim]-->[T*N,Dim]-->[index,Dim]
@@ -136,8 +145,7 @@ class SeparatedReplayBuffer(object):
             feedback_batch = feedback[indices].tolist()
 
             # instruct
-            instruct_indices = indices % n_rollout_threads
-            instruct_batch = [self.instruction[i] for i in instruct_indices]
+            instruct_batch = instructions[indices].tolist()
 
             batch = (obs_batch, instruct_batch, actions_batch, value_preds_batch, return_batch, masks_batch,
                      old_action_logits_batch, adv_targ)

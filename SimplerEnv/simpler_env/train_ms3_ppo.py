@@ -3,7 +3,10 @@ import json
 import pprint
 import random
 import gc
+import io
 import signal
+import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 import time
 from pathlib import Path
@@ -12,7 +15,7 @@ import torch
 import numpy as np
 import tyro
 import wandb
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import yaml
 from tqdm import tqdm
 from mani_skill.utils import visualization
@@ -50,9 +53,11 @@ class Args:
     steps_vh: int = 0  # episodes
     interval_eval: int = 10
     interval_save: int = 40
+    checkpoint_steps: str = ""
     eval_only: bool = False
     eval_episodes: int = 6
     eval_obj_set: str = "test"
+    eval_episode_start: int = 0
 
     # buffer
     buffer_inferbatch: int = 32
@@ -81,7 +86,10 @@ class Args:
     alg_entropy_coef: float = 0.0
     sdpo_ema_rate: float = 0.01
     sdpo_feedback_mode: str = "correct"  # correct, shuffled, none
-    sdpo_feedback_version: str = "relspatial-v2"  # relspatial-v2, relspatial-action-v1
+    sdpo_feedback_version: str = "relspatial-v2"  # relspatial-v2, relspatial-action-v1, relspatial-outcome-v2, multimodal-correction-v2
+    external_feedback_url: str = ""
+    external_feedback_model: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    external_feedback_timeout: int = 120
 
     # other
     wandb: bool = True
@@ -91,14 +99,57 @@ class Args:
 
 
 
+def parse_checkpoint_steps(value: str, steps_max: int, num_envs: int) -> tuple[int, ...]:
+    if num_envs < 1 or steps_max < 1 or steps_max % num_envs:
+        raise ValueError("steps_max must be a positive multiple of num_envs")
+    if not value:
+        return ()
+    try:
+        steps = tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError("checkpoint_steps must contain comma-separated integers") from error
+    if (not steps or tuple(sorted(set(steps))) != steps or
+            any(step < 1 or step > steps_max or step % num_envs for step in steps)):
+        raise ValueError("checkpoint_steps must be unique, increasing environment-step multiples within steps_max")
+    return steps
+
+
+def next_rollout_length(completed_steps: int, steps_max: int, num_envs: int,
+                        episode_len: int, checkpoint_steps: tuple[int, ...]) -> int:
+    if not 0 <= completed_steps < steps_max or episode_len < 1:
+        raise ValueError("Rollout position or maximum episode length is invalid")
+    next_boundary = min((step for step in checkpoint_steps if step > completed_steps), default=steps_max)
+    rollout_length = min(episode_len, (next_boundary - completed_steps) // num_envs)
+    if rollout_length < 1:
+        raise ValueError("Checkpoint boundary cannot be reached by the allocated environments")
+    return rollout_length
+
+
 class Runner:
     def __init__(self, all_args: Args):
         self.args = all_args
 
         # alg_name
         assert self.args.alg_name in ["ppo", "grpo", "sdpo"]
-        if self.args.sdpo_feedback_version not in {"relspatial-v2", "relspatial-action-v1"}:
+        if self.args.sdpo_feedback_version not in {"relspatial-v2", "relspatial-action-v1", "relspatial-outcome-v2", "multimodal-correction-v2"}:
             raise ValueError(f"Unknown sdpo_feedback_version: {self.args.sdpo_feedback_version}")
+        self.multimodal_mode = self.args.alg_name == "sdpo" and self.args.sdpo_feedback_version == "multimodal-correction-v2"
+        if self.multimodal_mode:
+            if not self.args.external_feedback_url:
+                raise ValueError("Multimodal correction requires --external-feedback-url")
+            if self.args.sdpo_feedback_mode != "correct" or self.args.alg_gradient_accum != 1 or self.args.alg_ppo_epoch != 1:
+                raise ValueError("Multimodal correction requires correct feedback, one optimizer step and one EMA update per feedback")
+        if self.args.alg_gradient_accum < 1:
+            raise ValueError("alg_gradient_accum must be positive")
+        if self.args.alg_name == "sdpo":
+            rollout_size = self.args.episode_len * self.args.num_envs
+            if self.args.buffer_minibatch == 0:
+                raise ValueError("buffer_minibatch cannot be zero")
+            if self.args.buffer_minibatch > 0 and rollout_size % self.args.buffer_minibatch:
+                raise ValueError("SDPO minibatch size must divide the rollout size")
+            minibatches = 1 if self.args.buffer_minibatch < 0 else rollout_size // self.args.buffer_minibatch
+            if minibatches % self.args.alg_gradient_accum:
+                raise ValueError("SDPO accumulation interval must divide the minibatch count")
 
         # set seed
         np.random.seed(self.args.seed)
@@ -126,6 +177,15 @@ class Runner:
         self.policy = OpenVLAPolicy(all_args, device_id_other)
 
         self.alg = OpenVLAPPO(all_args, self.policy)
+        self.external_feedback = None
+        if self.multimodal_mode:
+            from simpler_env.external_feedback import ExternalFeedbackClient
+            self.external_feedback = ExternalFeedbackClient(
+                base_url=self.args.external_feedback_url,
+                model=self.args.external_feedback_model,
+                api_key=os.environ.get("EXTERNAL_FEEDBACK_API_KEY", ""),
+                timeout_seconds=self.args.external_feedback_timeout,
+            )
 
         # env
         unnorm_state = self.policy.vla.get_action_stats(self.args.vla_unnorm_key)
@@ -213,17 +273,49 @@ class Runner:
 
         return info
 
+    def train_multimodal_feedback(self, image, instruction: str, action, record):
+        batch = (image, [instruction], action, None, None, None, None, None, [record])
+        self.policy.prep_training()
+        metrics = self.alg.train_sdpo_step(0, 1, batch)
+        self.policy.prep_rollout()
+        if metrics["optimizer_steps"] != 1.0:
+            raise RuntimeError("One multimodal feedback must produce one student and EMA update")
+        return metrics
+
+    def request_multimodal_feedback(self, instruction, before_image, after_image, outcome,
+                                    executed_action, rollout_step):
+        started = time.perf_counter()
+        record = self.external_feedback.generate(
+            instruction=instruction,
+            before_image=before_image,
+            after_image=after_image,
+            outcome=outcome,
+            executed_action=executed_action,
+            rollout_step=rollout_step,
+        )
+        return record, time.perf_counter() - started
+
     def save_feedback_archive(self, episode: int):
         """Persist decision-time privileged records for audit; never used as student input."""
         feedback_dir = self.glob_dir / "feedback"
         feedback_dir.mkdir(parents=True, exist_ok=True)
         path = feedback_dir / f"episode_{episode:06d}.jsonl"
-        with path.open("w", encoding="utf-8") as handle:
-            for decision_index in range(self.args.episode_len):
-                for env_index in range(self.args.num_envs):
-                    record = self.buffer.feedback[decision_index][env_index]
-                    if record is not None:
-                        handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+        image_tar = tarfile.open(feedback_dir / f"episode_{episode:06d}_images.tar", "w") if self.multimodal_mode else None
+        try:
+            with path.open("w", encoding="utf-8") as handle:
+                for decision_index in range(self.buffer.ep_len):
+                    for env_index in range(self.args.num_envs):
+                        record = self.buffer.feedback[decision_index][env_index]
+                        if record is not None:
+                            handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+                            if image_tar is not None:
+                                for phase, data in (("before", record.before_jpeg), ("after", record.after_jpeg)):
+                                    member = tarfile.TarInfo(record.image_member(phase))
+                                    member.size = len(data)
+                                    image_tar.addfile(member, io.BytesIO(data))
+        finally:
+            if image_tar is not None:
+                image_tar.close()
         return path
 
     @torch.no_grad()
@@ -307,13 +399,15 @@ class Runner:
             raise ValueError("eval_episodes must be a positive multiple of num_envs")
         if self.args.eval_obj_set not in {"train", "test"}:
             raise ValueError("eval_obj_set must be 'train' or 'test'")
+        if self.args.eval_episode_start < 0:
+            raise ValueError("eval_episode_start must be nonnegative")
 
         results_path = self.save_dir / "eval_only.jsonl"
         self.policy.prep_rollout()
         batch_stats = defaultdict(list)
         with results_path.open("w", encoding="utf-8") as handle:
             for batch_index in range(self.args.eval_episodes // self.args.num_envs):
-                episode_offset = batch_index * self.args.num_envs
+                episode_offset = self.args.eval_episode_start + batch_index * self.args.num_envs
                 stats, episode_stats = self.eval(
                     self.args.eval_obj_set,
                     episode_offset=episode_offset,
@@ -434,10 +528,24 @@ class Runner:
         return env_stats_ret
 
     def run(self):
-        max_episodes = self.args.steps_max // self.args.episode_len // self.args.num_envs
-
-        for episode in range(max_episodes):
+        checkpoint_steps = parse_checkpoint_steps(self.args.checkpoint_steps, self.args.steps_max, self.args.num_envs)
+        training_started = time.monotonic()
+        evaluation_seconds = 0.0
+        optimizer_steps_total = 0.0
+        completed_steps = 0
+        episode = 0
+        feedback_pool = ThreadPoolExecutor(max_workers=min(self.args.num_envs, 4)) if self.multimodal_mode else None
+        while completed_steps < self.args.steps_max:
+            rollout_length = next_rollout_length(
+                completed_steps, self.args.steps_max, self.args.num_envs,
+                self.args.episode_len, checkpoint_steps,
+            )
+            if self.buffer.ep_len != rollout_length:
+                self.buffer = SeparatedReplayBuffer(
+                    replace(self.args, episode_len=rollout_length), obs_dim=(480, 640, 3), act_dim=7,
+                )
             env_infos = defaultdict(lambda: [])
+            online_infos = defaultdict(list)
             ep_time = time.time()
             rollout_time = time.time()
             for device_index in range(torch.cuda.device_count()):
@@ -446,16 +554,57 @@ class Runner:
             obs_img, instruction, info = self.env.reset(obj_set="train", same_init=self.args.use_same_init)
             self.buffer.warmup(obs_img.cpu().numpy(), instruction)
 
-            for _ in tqdm(range(self.args.episode_len), desc="rollout"):
+            for decision_index in tqdm(range(rollout_length), desc="rollout"):
                 value, action, logprob = self.collect()
-                feedback = self.env.capture_feedback(
-                    raw_action=action if self.args.sdpo_feedback_version == "relspatial-action-v1" else None,
-                    version=self.args.sdpo_feedback_version,
-                ) if self.args.alg_name == "sdpo" else None
-                obs_img, reward, done, env_info = self.env.step(action)
+                outcome_mode = self.args.alg_name == "sdpo" and self.args.sdpo_feedback_version in {
+                    "relspatial-outcome-v2", "multimodal-correction-v2",
+                }
+                reset_after_step = decision_index + 1 < rollout_length
+                if outcome_mode:
+                    obs_img, reward, done, env_info, feedback = self.env.step_with_outcome_feedback(
+                        action, reset_after_step=reset_after_step, include_contact=self.multimodal_mode,
+                    )
+                    if self.multimodal_mode:
+                        executed_actions = self.env._process_action(action).detach().cpu().numpy()
+                        after_images = obs_img.detach().cpu().numpy()
+                        outcomes = feedback
+                        feedback = []
+                        requests = [feedback_pool.submit(
+                            self.request_multimodal_feedback,
+                            self.buffer.instruction[env_index],
+                            self.buffer.obs[self.buffer.step, env_index],
+                            after_images[env_index],
+                            outcome,
+                            executed_actions[env_index],
+                            decision_index,
+                        ) for env_index, outcome in enumerate(outcomes)]
+                        for env_index, outcome in enumerate(outcomes):
+                            instruction = self.buffer.instruction[env_index]
+                            before_image = self.buffer.obs[self.buffer.step, env_index:env_index + 1]
+                            record, feedback_seconds = requests[env_index].result()
+                            feedback.append(record)
+                            online_infos["time/external_feedback_seconds"].append(feedback_seconds)
+                            metrics = self.train_multimodal_feedback(
+                                before_image, instruction, action[env_index:env_index + 1].detach().cpu().numpy(), record,
+                            )
+                            for key, metric in metrics.items():
+                                online_infos[key].append(metric)
+                else:
+                    feedback = self.env.capture_feedback(
+                        raw_action=action if self.args.sdpo_feedback_version == "relspatial-action-v1" else None,
+                        version=self.args.sdpo_feedback_version,
+                    ) if self.args.alg_name == "sdpo" else None
+                    obs_img, reward, done, env_info = self.env.step(action)
 
-                data = (obs_img, action, logprob, value, reward, done, feedback)
+                reset_batch = outcome_mode and reset_after_step and bool(done.any())
+                boundary_done = torch.ones_like(done) if reset_batch else done
+                data = (obs_img, action, logprob, value, reward, boundary_done, feedback)
                 self.insert(data)
+                if reset_batch:
+                    next_image, next_instruction, _ = self.env.reset(
+                        obj_set="train", same_init=self.args.use_same_init,
+                    )
+                    self.buffer.set_next_observation(next_image.cpu().numpy(), next_instruction)
 
                 # info
                 if "episode" in env_info.keys():
@@ -463,7 +612,7 @@ class Runner:
                         env_infos[f"{k}"] += v
 
             # steps
-            steps = (episode + 1) * self.args.episode_len * self.args.num_envs
+            steps = completed_steps + rollout_length * self.args.num_envs
             print(pprint.pformat({k: round(np.mean(v), 4) for k, v in env_infos.items()}))
             if self.args.alg_name == "sdpo":
                 feedback_path = self.save_feedback_archive(episode)
@@ -474,7 +623,7 @@ class Runner:
                 for step_records in self.buffer.feedback
                 for record in step_records
             )
-            feedback_total = self.args.episode_len * self.args.num_envs
+            feedback_total = rollout_length * self.args.num_envs
 
             # train and process infos
             if self.args.alg_name != "sdpo":
@@ -485,10 +634,21 @@ class Runner:
 
             # train
             update_time = time.time()
-            infos = self.train()
+            if self.multimodal_mode:
+                infos = {
+                    f"train/{key}": (sum(values) if key == "optimizer_steps" else float(np.mean(values)))
+                    for key, values in online_infos.items()
+                }
+                infos["buffer/reward_mean"] = np.mean(self.buffer.rewards)
+                infos["buffer/mask_mean"] = np.mean(1.0 - self.buffer.masks)
+            else:
+                infos = self.train()
             update_seconds = time.time() - update_time
             for k, v in env_infos.items():
                 infos[f"env/{k}"] = np.mean(v)
+            optimizer_steps_total += infos.get("train/optimizer_steps", 0.0)
+            infos["train/optimizer_steps_cumulative"] = optimizer_steps_total
+            infos["time/train_cumulative_seconds"] = time.monotonic() - training_started - evaluation_seconds
             infos["time/rollout_seconds"] = rollout_seconds
             infos["time/update_seconds"] = update_seconds
             infos["time/episode_seconds"] = time.time() - ep_time
@@ -509,7 +669,9 @@ class Runner:
             print(pprint.pformat({k: round(v, 4) for k, v in infos.items()}))
 
             # eval
-            if episode % self.args.interval_eval == self.args.interval_eval - 1 or episode == max_episodes - 1:
+            if self.args.interval_eval > 0 and (
+                episode % self.args.interval_eval == self.args.interval_eval - 1 or steps == self.args.steps_max
+            ):
                 print(f"Evaluating at {steps}")
                 eval_time = time.time()
                 sval_stats = self.eval_over_episodes(obj_set="train")
@@ -522,16 +684,31 @@ class Runner:
                 sval_stats = {f"eval/{k}_ood": v for k, v in sval_stats.items()}
                 sval_stats["time/eval_test_seconds"] = time.time() - eval_time
                 wandb.log(sval_stats, step=steps)
+                evaluation_seconds += sval_stats["time/eval_train_seconds"] + sval_stats["time/eval_test_seconds"]
 
             # save
-            if episode % self.args.interval_save == self.args.interval_save - 1 or episode == max_episodes - 1:
+            if (steps in checkpoint_steps or steps == self.args.steps_max or
+                    self.args.interval_save > 0 and episode % self.args.interval_save == self.args.interval_save - 1):
                 print(f"Saving model at {steps}")
-                save_path = self.glob_dir / f"steps_{episode:0>4d}"
+                save_path = self.glob_dir / (
+                    f"step_{steps:06d}" if checkpoint_steps else f"steps_{episode:0>4d}"
+                )
                 self.policy.save(save_path)
+                if checkpoint_steps:
+                    (save_path / "environment_steps.json").write_text(json.dumps({
+                        "environment_steps": steps,
+                        "rollout_length": rollout_length,
+                        "num_envs": self.args.num_envs,
+                        "rollout_index": episode,
+                        "optimizer_steps_cumulative": optimizer_steps_total,
+                        "train_cumulative_seconds": time.monotonic() - training_started - evaluation_seconds,
+                    }, sort_keys=True) + "\n")
 
                 if self.args.save_render:
                     self.render(epoch=episode, obj_set="train")
                     self.render(epoch=episode, obj_set="test")
+            completed_steps = steps
+            episode += 1
 
 
 def main():

@@ -1,5 +1,17 @@
 # VLA-RL-Study: What Can RL Bring to VLA Generalization? An Empirical Study
 
+## Multimodal Retrospective SDPO (`ex/v2`)
+
+This branch adds opt-in `multimodal-correction-v2`: an external vision-language model reads the task, executed action, before/after images and simulator state change, then writes structured retrospective and next-step guidance. Low-level translation directions use the robot-root frame, not the world or camera frame. Only the EMA teacher receives the feedback text; it rescores the student's original action tokens. Each feedback produces one student optimizer step and one teacher EMA update. The student and deployment policy never call the external model. See [`docs/SDPO_MULTIMODAL_V2.md`](docs/SDPO_MULTIMODAL_V2.md) for protocol, service setup, smoke and limitations. Existing feedback versions remain available.
+
+## SDPO Execution-Outcome Feedback (`ex/1111-outcome-feedback`)
+
+This branch adds opt-in `--sdpo-feedback-version relspatial-outcome-v2`. For each sampled student action, the simulator executes the action decoded from the original tokens, then records before/after center distances, source movement, grasp transition, step success, and episode termination. Missing measurements are marked unknown; distance reduction is not treated as proof of correct action. The v1 pre-execution heuristic remains available for comparison. The task cannot partially reset parallel environments, so any early termination triggers a full-vector reset after feedback is captured; interrupted peer episodes are marked separately. Per-decision observations and instructions remain aligned with their original actions and feedback.
+
+Student rollout still uses only images and instructions. After collecting a batch, the EMA teacher reads the outcome text and reevaluates the original student action tokens; stopped-gradient teacher logits supervise student reverse-KL. No teacher action is generated as a replacement label. `buffer_minibatch` and `alg_gradient_accum` control update frequency independently of the feedback version. The one-update-per-160-sample baseline uses `2`, `80`, and `alg_ppo_epoch=1`, respectively.
+
+Run the one-batch local smoke with `bash SimplerEnv/scripts/run_sdpo_outcome_v2_smoke.sh`. W&B is enabled; if the API is unavailable, set `WANDB_MODE=offline` and sync the retained run once access returns. Results and limitations are in [`docs/SDPO_OUTCOME_V2.md`](docs/SDPO_OUTCOME_V2.md).
+
 ## SDPO RelSpatial Action Feedback v1 (`ex/1111-v1`)
 
 Completed 2400-step, two-seed results and limitations: [`docs/SDPO_V1_RESULTS.md`](docs/SDPO_V1_RESULTS.md). Under this protocol, correct v1 SDPO reached `0/60` successes at the final checkpoint and did not outperform shuffled v1 feedback. Do not scale up before diagnosing the feedback-conditioned teacher and training stability.

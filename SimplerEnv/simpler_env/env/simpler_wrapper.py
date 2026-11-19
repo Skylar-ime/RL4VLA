@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from mani_skill.envs.sapien_env import BaseEnv
-from simpler_env.feedback import build_action_guidance_feedback, build_rel_spatial_feedback
+from simpler_env.feedback import build_action_guidance_feedback, build_action_outcome_feedback, build_rel_spatial_feedback
 
 
 def completed_episode_info(info, done):
@@ -47,6 +47,7 @@ class SimlerWrapper:
         self.reward_old = torch.zeros(self.args.num_envs, 1, dtype=torch.float32, device=self.env.unwrapped.device)
         self.episode_ids = [None] * self.num_envs
         self.decision_index = [0] * self.num_envs
+        self.reset_generation = -1
 
         # constants
         bins = np.linspace(-1, 1, 256)
@@ -130,12 +131,13 @@ class SimlerWrapper:
         episode_seed = getattr(self.env.unwrapped, "_episode_seed", [None] * self.num_envs)
         self.episode_ids = [int(x) for x in episode_seed]
         self.decision_index = [0] * self.num_envs
+        self.reset_generation += 1
 
         return obs_image, instruction, info
 
-    def capture_feedback(self, raw_action=None, version="relspatial-v2"):
+    def capture_feedback(self, raw_action=None, version="relspatial-v2", advance=True, decision_offset=0):
         """Capture privileged state before action execution, aligned to current observation."""
-        if version not in {"relspatial-v2", "relspatial-action-v1"}:
+        if version not in {"relspatial-v2", "relspatial-action-v1", "relspatial-outcome-v2"}:
             raise ValueError(f"Unknown feedback version: {version}")
         if version == "relspatial-action-v1" and raw_action is None:
             raise ValueError("Action guidance requires the sampled action")
@@ -158,8 +160,8 @@ class SimlerWrapper:
         robot = getattr(getattr(task, "agent", None), "robot", None)
         current_grasped = None
         action_delta = self._process_action(raw_action) if raw_action is not None else None
-        root_quaternion = robot.pose.q if robot is not None else None
-        if version == "relspatial-action-v1" and hasattr(task, "objs_carrot") and hasattr(task, "select_carrot_ids"):
+        root_quaternion = robot.pose.q if version == "relspatial-action-v1" and robot is not None else None
+        if version in {"relspatial-action-v1", "relspatial-outcome-v2"} and hasattr(task, "objs_carrot") and hasattr(task, "select_carrot_ids"):
             current_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=task.select_carrot_ids.device)
             for object_index, object_name in enumerate(task.carrot_names):
                 grasped = task.agent.is_grasping(task.objs_carrot[object_name])
@@ -182,13 +184,16 @@ class SimlerWrapper:
 
         records = []
         for index in range(self.num_envs):
+            episode_id = self.episode_ids[index]
+            if version == "relspatial-outcome-v2":
+                episode_id = f"{episode_id}:reset{getattr(self, 'reset_generation', 0)}:env{index}"
             record = build_rel_spatial_feedback(
-                episode_id=self.episode_ids[index], decision_index=self.decision_index[index],
+                episode_id=episode_id, decision_index=self.decision_index[index] + decision_offset,
                 source_name=source_names[index], target_name=target_names[index],
                 source_position=at(extra.get("extra_pos_carrot"), index),
                 target_position=at(extra.get("extra_pos_plate"), index),
                 gripper_position=at(extra.get("extra_pos_gripper"), index),
-                source_grasped=at(current_grasped if version == "relspatial-action-v1" else episode_stats.get("is_src_obj_grasped"), index),
+                source_grasped=at(current_grasped if version in {"relspatial-action-v1", "relspatial-outcome-v2"} else episode_stats.get("is_src_obj_grasped"), index),
                 gripper_open=at(gripper_open, index),
             )
             if version == "relspatial-action-v1":
@@ -198,9 +203,51 @@ class SimlerWrapper:
                     root_quaternion_wxyz=at(root_quaternion, index),
                     gripper_command=action_delta[index, 6],
                 )
-            self.decision_index[index] += 1
+            if advance:
+                self.decision_index[index] += 1
             records.append(record)
         return records
+
+    def selected_source_contact(self):
+        task = self.env.unwrapped
+        if not all(hasattr(task, name) for name in (
+                "select_carrot_ids", "carrot_names", "objs_carrot", "scene", "agent")):
+            return [None] * self.num_envs
+        if not all(hasattr(task.agent, name) for name in ("finger1_link", "finger2_link")):
+            return [None] * self.num_envs
+        left = torch.zeros(self.num_envs, device=task.select_carrot_ids.device)
+        right = torch.zeros_like(left)
+        for object_index, object_name in enumerate(task.carrot_names):
+            source = task.objs_carrot[object_name]
+            selected = task.select_carrot_ids == object_index
+            left_force = task.scene.get_pairwise_contact_forces(task.agent.finger1_link, source).norm(dim=1)
+            right_force = task.scene.get_pairwise_contact_forces(task.agent.finger2_link, source).norm(dim=1)
+            left = torch.where(selected, left_force, left)
+            right = torch.where(selected, right_force, right)
+        return torch.stack((left, right), dim=1).detach().cpu().tolist()
+
+    def step_with_outcome_feedback(self, raw_action, reset_after_step=False, include_contact=False):
+        before = self.capture_feedback(version="relspatial-outcome-v2")
+        contact_before = self.selected_source_contact() if include_contact else [None] * self.num_envs
+        root_quaternions = self.env.unwrapped.agent.robot.pose.q.detach().cpu().tolist() if include_contact else [None] * self.num_envs
+        obs_image, reward, done, info = self.step(raw_action)
+        if done.any() and "final_observation" in info:
+            raise RuntimeError("Outcome feedback requires post-action state before any automatic reset")
+        after = self.capture_feedback(version="relspatial-outcome-v2", advance=False, decision_offset=-1)
+        contact_after = self.selected_source_contact() if include_contact else [None] * self.num_envs
+        success = info.get("success")
+        records = []
+        for index in range(self.num_envs):
+            item_success = None if success is None else bool(success.reshape(-1)[index])
+            records.append(build_action_outcome_feedback(
+                before[index], after[index], env_index=index,
+                action_token_ids=raw_action[index].detach().cpu().tolist(),
+                episode_done=bool(done.reshape(-1)[index]), task_success=item_success,
+                rollout_interrupted=bool(reset_after_step and done.any() and not done.reshape(-1)[index]),
+                contact_before_n=contact_before[index], contact_after_n=contact_after[index],
+                root_quaternion_wxyz=root_quaternions[index],
+            ))
+        return obs_image, reward, done, info, records
 
     def step(self, raw_action):
         action = self._process_action(raw_action)

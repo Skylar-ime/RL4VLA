@@ -353,8 +353,26 @@ class OpenVLAPolicy:
                 "action_support": "OpenVLA discrete action bins 32000-256:32000",
                 "token_alignment": "raw rollout action IDs appended after tokenized prefix",
                 "feedback_mode": self.args.sdpo_feedback_mode,
-                "feedback_source": "decision-time privileged RelSpatial state and sampled-action heuristic" if self.args.sdpo_feedback_version == "relspatial-action-v1" else "decision-time privileged RelSpatial state",
-                "feedback_text_version": "relspatial-action-v1" if self.args.sdpo_feedback_version == "relspatial-action-v1" else "relspatial-v2-grammatical-directions",
+                "feedback_source": (
+                    "external multimodal retrospective correction from executed-action before/after images and state"
+                    if self.args.sdpo_feedback_version == "multimodal-correction-v2"
+                    else
+                    "executed-action before/after simulator outcome" if self.args.sdpo_feedback_version == "relspatial-outcome-v2"
+                    else "decision-time privileged RelSpatial state and sampled-action heuristic"
+                    if self.args.sdpo_feedback_version == "relspatial-action-v1"
+                    else "decision-time privileged RelSpatial state"
+                ),
+                "feedback_text_version": (
+                    "relspatial-v2-grammatical-directions" if self.args.sdpo_feedback_version == "relspatial-v2"
+                    else self.args.sdpo_feedback_version
+                ),
+                "buffer_minibatch": self.args.buffer_minibatch,
+                "gradient_accumulation_minibatches": self.args.alg_gradient_accum,
+                "training_epochs_per_rollout": self.args.alg_ppo_epoch,
+                "online_one_student_and_ema_update_per_feedback": self.args.sdpo_feedback_version == "multimodal-correction-v2",
+                "external_feedback_model": self.args.external_feedback_model if self.args.sdpo_feedback_version == "multimodal-correction-v2" else None,
+                "external_feedback_schema": "robot-root-direction-v2" if self.args.sdpo_feedback_version == "multimodal-correction-v2" else None,
+                "external_correction_schema": "high-low-retrospective-v2" if self.args.sdpo_feedback_version == "multimodal-correction-v2" else None,
                 "ppo_policy_loss": False,
                 "advantage_weighting": False,
             }
@@ -531,6 +549,7 @@ class OpenVLAPPO:
 
     def train_ppo(self, buffer):
         train_info = defaultdict(lambda: [])
+        optimizer_steps = 0
 
         # buffer
         buffer.compute_returns_ppo()
@@ -541,12 +560,15 @@ class OpenVLAPPO:
 
             for idx, batch in tqdm(enumerate(data_generator), total=minibatch_count, desc="train"):
                 info = self.train_ppo_step(idx, minibatch_count, batch)
+                if idx % self.args.alg_gradient_accum == self.args.alg_gradient_accum - 1 or idx == minibatch_count - 1:
+                    optimizer_steps += 1
                 for key, value in info.items():
                     train_info[key].append(value)
 
         final_info = {}
         for key, value in train_info.items():
             final_info[key] = np.mean(value)
+        final_info["optimizer_steps"] = float(optimizer_steps)
 
         return final_info
 
@@ -599,7 +621,8 @@ class OpenVLAPPO:
 
         grad_norm = None
         update_seconds = 0.0
-        if idx % self.args.alg_gradient_accum == self.args.alg_gradient_accum - 1 or idx == total - 1:
+        optimizer_step = idx % self.args.alg_gradient_accum == self.args.alg_gradient_accum - 1 or idx == total - 1
+        if optimizer_step:
             update_time = time.perf_counter()
             grad_norm = nn.utils.clip_grad_norm_(self.policy.params_vla, self.ppo_grad_norm)
             self.policy.vla_optimizer.step()
@@ -609,6 +632,7 @@ class OpenVLAPPO:
         return {"loss": loss.item(), "valid_tokens": float(valid_mask.sum().item()),
                 "policy_entropy": policy_entropy.item(),
                 "teacher_student_kl": loss.item(),
+                "optimizer_steps": float(optimizer_step),
                 "time/student_forward_seconds": student_seconds,
                 "time/teacher_forward_seconds": teacher_seconds,
                 "time/update_seconds": update_seconds,
@@ -625,4 +649,5 @@ class OpenVLAPPO:
             ):
                 for key, value in self.train_sdpo_step(idx, minibatch_count, batch).items():
                     train_info[key].append(value)
-        return {key: np.mean(value) for key, value in train_info.items()}
+        return {key: np.sum(value) if key == "optimizer_steps" else np.mean(value)
+                for key, value in train_info.items()}

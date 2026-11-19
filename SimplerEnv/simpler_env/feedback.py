@@ -55,6 +55,127 @@ class ActionGuidanceRecord:
         }
 
 
+@dataclass(frozen=True)
+class ActionOutcomeRecord:
+    before: RelSpatialRecord
+    after: RelSpatialRecord
+    env_index: int
+    action_token_ids: tuple[int, ...]
+    episode_done: bool
+    rollout_interrupted: bool
+    task_success: bool | None
+    distance_change_m: float | None
+    source_movement_m: float | None
+    grasp_transition: str
+    text: str
+    contact_before_n: tuple[float, float] | None = None
+    contact_after_n: tuple[float, float] | None = None
+    root_quaternion_wxyz: tuple[float, float, float, float] | None = None
+
+    @property
+    def timestamp_utc(self) -> str:
+        return self.before.timestamp_utc
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "feedback_version": "relspatial-outcome-v2",
+            "episode_id": self.before.episode_id,
+            "decision_index": self.before.decision_index,
+            "env_index": self.env_index,
+            "timestamp_utc": self.timestamp_utc,
+            "action_token_ids": self.action_token_ids,
+            "episode_done": self.episode_done,
+            "rollout_interrupted": self.rollout_interrupted,
+            "task_success": self.task_success,
+            "before": self.before.to_dict(),
+            "after": self.after.to_dict(),
+            "distance_change_m": self.distance_change_m,
+            "source_movement_m": self.source_movement_m,
+            "grasp_transition": self.grasp_transition,
+            "text": self.text,
+            "contact_before_n": self.contact_before_n,
+            "contact_after_n": self.contact_after_n,
+        }
+        if self.root_quaternion_wxyz is not None:
+            result["root_quaternion_wxyz"] = self.root_quaternion_wxyz
+        return result
+
+
+def build_action_outcome_feedback(before: RelSpatialRecord, after: RelSpatialRecord,
+                                  *, env_index: int, action_token_ids: Sequence[int], episode_done: bool,
+                                  task_success: bool | None, rollout_interrupted: bool = False,
+                                  contact_before_n: Sequence[float] | None = None,
+                                  contact_after_n: Sequence[float] | None = None,
+                                  root_quaternion_wxyz: Sequence[float] | None = None,
+                                  distance_deadband_m: float = 0.001,
+                                  movement_deadband_m: float = 0.001) -> ActionOutcomeRecord:
+    if (before.episode_id, before.decision_index) != (after.episode_id, after.decision_index):
+        raise ValueError("Outcome states must belong to the same decision")
+    if len(action_token_ids) != 7:
+        raise ValueError("Outcome feedback requires the original seven action tokens")
+
+    distance_change = None
+    if before.source_grasped is False and all(value is not None for value in (
+            before.source_position, before.gripper_position, after.source_position, after.gripper_position)):
+        old_distance = np.linalg.norm(np.subtract(before.source_position, before.gripper_position))
+        new_distance = np.linalg.norm(np.subtract(after.source_position, after.gripper_position))
+        distance_change = float(new_distance - old_distance)
+        distance_text = f"Source-to-gripper center distance changed from {old_distance:.3f} m to {new_distance:.3f} m"
+    elif before.source_grasped is True and all(value is not None for value in (
+            before.source_position, before.target_position, after.source_position, after.target_position)):
+        old_distance = np.linalg.norm(np.subtract(before.source_position, before.target_position))
+        new_distance = np.linalg.norm(np.subtract(after.source_position, after.target_position))
+        distance_change = float(new_distance - old_distance)
+        distance_text = f"Source-to-target center distance changed from {old_distance:.3f} m to {new_distance:.3f} m"
+    else:
+        distance_text = "Relevant center-distance change is unknown"
+    if distance_change is not None:
+        change = "decreased" if distance_change < -distance_deadband_m else (
+            "increased" if distance_change > distance_deadband_m else
+            f"changed by at most {distance_deadband_m:.3f} m")
+        distance_text += f" ({change}; this alone does not establish action correctness)"
+
+    source_movement = None
+    if before.source_position is not None and after.source_position is not None:
+        source_movement = float(np.linalg.norm(np.subtract(after.source_position, before.source_position)))
+        movement_text = (f"Source moved {source_movement:.3f} m" if source_movement > movement_deadband_m
+                         else f"Source movement was at most {movement_deadband_m:.3f} m")
+    else:
+        movement_text = "Source movement is unknown"
+
+    if before.source_grasped is None or after.source_grasped is None:
+        transition = "unknown"
+    elif not before.source_grasped and after.source_grasped:
+        transition = "established"
+    elif before.source_grasped and not after.source_grasped:
+        transition = "lost"
+    else:
+        transition = "maintained" if after.source_grasped else "not established"
+    success_text = "unknown" if task_success is None else ("true" if task_success else "false")
+    def contact_tuple(values):
+        if values is None:
+            return None
+        array = np.asarray(values, dtype=np.float64).reshape(-1)
+        return tuple(float(value) for value in array) if array.size == 2 and np.isfinite(array).all() else None
+
+    before_contact, after_contact = contact_tuple(contact_before_n), contact_tuple(contact_after_n)
+    root_quaternion = None
+    if root_quaternion_wxyz is not None:
+        values = np.asarray(root_quaternion_wxyz, dtype=np.float64).reshape(-1)
+        if values.size != 4 or not np.isfinite(values).all() or np.linalg.norm(values) == 0:
+            raise ValueError("Root quaternion must have four finite nonzero components")
+        root_quaternion = tuple(float(value) for value in values / np.linalg.norm(values))
+    text = (f"Observed result after the sampled action: {distance_text}. {movement_text}. "
+            f"Grasp transition: {transition}. Task success at this step: {success_text}. "
+            f"Episode ended: {'true' if episode_done else 'false'}. "
+            f"Rollout interrupted by a peer environment ending: {'true' if rollout_interrupted else 'false'}.")
+    if before_contact is not None or after_contact is not None:
+        text += f" Source contact forces before/after action (left/right, N): {before_contact}/{after_contact}."
+    return ActionOutcomeRecord(before, after, env_index, tuple(int(token) for token in action_token_ids),
+                               bool(episode_done), bool(rollout_interrupted), task_success, distance_change,
+                               source_movement, transition, text, before_contact, after_contact, root_quaternion)
+
+
 def _vec(value: Any) -> tuple[float, float, float] | None:
     if value is None:
         return None
