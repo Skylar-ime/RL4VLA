@@ -18,7 +18,23 @@ OPPOSITE = {
 OPPOSITE_JUDGMENT = {"aligned": "opposed", "opposed": "aligned", "not aligned": "aligned"}
 
 
-def feedback_variants(record):
+def root_direction_suggestion(record, reverse=False):
+    desired = record.get("desired_delta_root")
+    if desired is None:
+        return None
+    axes = sorted((index for index in range(3) if abs(desired[index]) >= 0.005),
+                  key=lambda index: -abs(desired[index]))
+    if not axes:
+        return None
+    directions = [
+        f"{'positive' if (desired[index] > 0) != reverse else 'negative'} {'xyz'[index]}"
+        for index in axes
+    ]
+    target = "target container" if record["source_grasped"] else "source object"
+    return f"move in the robot root frame toward the {target}: {', '.join(directions)}"
+
+
+def feedback_variants(record, include_root_direction=False):
     state = record["text"].split(" Suggested next action: ", 1)[0]
     suggestion = record["suggested_action"]
     words = suggestion.split()
@@ -28,7 +44,7 @@ def feedback_variants(record):
         reverse_direction = " ".join(words)
     judgment = record["action_judgment"]
     reversed_judgment = OPPOSITE_JUDGMENT.get(judgment)
-    return {
+    variants = {
         "original": record["text"],
         "state_only": state,
         "reverse_direction": (
@@ -43,6 +59,26 @@ def feedback_variants(record):
         ),
         "no_feedback": None,
     }
+    if include_root_direction:
+        root_suggestion = root_direction_suggestion(record)
+        reversed_root_suggestion = root_direction_suggestion(record, reverse=True)
+        variants["world_direction_only"] = f"Suggested next action: {suggestion}."
+        variants["root_direction"] = (
+            f"{state} Suggested next action: {root_suggestion}. "
+            f"Sampled action is {judgment} with this suggestion."
+        ) if root_suggestion is not None else record["text"]
+        variants["root_direction_only"] = (
+            f"Suggested next action: {root_suggestion}." if root_suggestion is not None else record["text"]
+        )
+        variants["reverse_root_direction_only"] = (
+            f"Suggested next action: {reversed_root_suggestion}."
+            if reversed_root_suggestion is not None else record["text"]
+        )
+        variants["reverse_root_direction"] = (
+            f"{state} Suggested next action: {reversed_root_suggestion}. "
+            f"Sampled action is {judgment} with this suggestion."
+        ) if reversed_root_suggestion is not None else record["text"]
+    return variants
 
 
 def phase(record):
@@ -75,6 +111,8 @@ def main():
     parser.add_argument("--checkpoint-label", required=True)
     parser.add_argument("--sources", type=Path, nargs=2, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--root-direction", action="store_true",
+                        help="Compare explicit robot root-frame direction against v1 world-frame feedback")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
@@ -103,9 +141,13 @@ def main():
                 "task_description": [record["instruction"] for record in batch],
             }
             actions = torch.tensor([record["action_token_ids"] for record in batch], device="cuda")
-            variants = [feedback_variants(record) for record in batch]
+            variants = [feedback_variants(record, args.root_direction) for record in batch]
             logits_by_mode = {}
-            for mode in ("original", "state_only", "reverse_direction", "reverse_judgment", "no_feedback"):
+            modes = (("original", "no_feedback", "world_direction_only", "root_direction",
+                      "root_direction_only", "reverse_root_direction", "reverse_root_direction_only")
+                     if args.root_direction else
+                     ("original", "state_only", "reverse_direction", "reverse_judgment", "no_feedback"))
+            for mode in modes:
                 feedback = [variant[mode] for variant in variants]
                 if any(value is None for value in feedback) and mode not in {"no_feedback"}:
                     if mode == "reverse_direction" and all(value is None for value in feedback):
@@ -126,6 +168,8 @@ def main():
                         "episode_id": record["episode_id"],
                         "decision_index": record["decision_index"],
                         "phase": phase(record),
+                        **({"root_direction_applicable": root_direction_suggestion(record) is not None}
+                           if args.root_direction else {}),
                         "mode": mode,
                         "teacher_kl_from_original": float(kl[index].item()),
                         "direction_projection_m": direction_score(
