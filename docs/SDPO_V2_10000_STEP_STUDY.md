@@ -18,10 +18,12 @@
 
 robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2` Git 修订；正式训练只申请 **1 张 H800**。本机 **1 张 RTX 4090** 托管 Qwen2.5-VL-3B-Instruct 反馈服务，仅绑定本机私网地址并使用随机 Bearer key 供 H800 作业调用；计算节点到该地址的连通性已用 GPU-free Slurm 作业验证。训练入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_h800.sbatch`，默认 `NUM_ENVS=8`、`BUFFER_INFERBATCH=8`，提高 H800 rollout 与 OpenVLA 前向批量；外部反馈仍逐决策更新。先串行跑 SDPO，再在相同 H800 资源配置下跑 PPO；两组不能同时争抢 H800。以端到端环境动作步/小时、反馈延迟、优化器步数、GPU 占用和 OOM 为依据调节并行环境数。逐反馈更新的依赖会让 H800 在等待本地 Qwen 时空闲；测量这部分空闲，不以虚假的 100% 利用率作为目标。保持最多两张 GPU 同时占用。
 
-本机固定评测入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh`。验证集传 `EVAL_EPISODE_START=0 EVAL_EPISODES=60`，最终测试集传 `EVAL_EPISODE_START=60 EVAL_EPISODES=100 EVAL_NUM_ENVS=5`；使用不同 episode ID，后者不得在中途评测或提示词调试时运行。每组每个 checkpoint 单独指定唯一 `EVAL_LABEL` 和 `VLA_LOAD_PATH`。训练关闭内置评测；累计训练墙钟和优化器步数写入 W&B 及 `environment_steps.json`，避免把固定评测时间算进训练速度。
+固定评测入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh`；robot 上的串行 H800 包装为 `SimplerEnv/scripts/run_sdpo_v2_eval_h800.sbatch`。验证集传 `EVAL_EPISODE_START=0 EVAL_EPISODES=60`，最终测试集传 `EVAL_EPISODE_START=60 EVAL_EPISODES=100 EVAL_NUM_ENVS=5`；使用不同 episode ID，后者不得在中途评测或提示词调试时运行。每组每个 checkpoint 单独指定唯一 `EVAL_LABEL` 和 `VLA_LOAD_PATH`。训练关闭内置评测；累计训练墙钟和优化器步数写入 W&B 及 `environment_steps.json`，避免把固定评测时间算进训练速度。
 
 启动前验证 3B 服务对两图请求可用、模型 ID 和 JSON 结构匹配，并完成少量真实步骤的机制检查；这属于训练启动检查，不是额外的反馈准入实验。反馈连续拒绝、模型服务不可达或产物不完整时停止并保留原件；不得静默回退到规则标签。每个阶段保留完整配置、Git 修订、模型来源、W&B run、原始反馈、图像哈希、更新次数、checkpoint 和逐集评测。W&B 云端不可用时先保存离线 run，实际同步和 API 可见后才标注已上传。完成 smoke 后删除临时脚本、密钥、重复权重和无关日志；保留有效审计与训练结果。
 
 ## 当前状态
 
-2026-11-19：方案已固定。3B 权重已下载，本机 4090 反馈服务已加载；robot Git 与本机均在 `ex/v2` commit `c89204a`，GPU-free Slurm 作业 `17563` 证明计算节点可访问本机私网。首个 H800 入口试跑 `17565` 在加载模型前因脚本误用本机 warm-up 路径失败，未执行环境动作或更新；已将 robot 默认路径修为 `$HOME/hf-cache/models/openvla-7b-rlvla-warmup`，待重新同步后再试。历史 warm-up 在先前 30 集协议下成功 14/30；本研究的共同 60 集基线正在评测。
+2026-11-19：3B 权重已下载，本机 4090 服务使用 `transformers==4.51.3`、`torch==2.2.0+cu121` 的独立推理运行时；robot 与本机均为 `ex/v2` 同一 Git 修订。GPU-free Slurm 作业 `17563` 证明计算节点可访问本机私网。第一次 H800 smoke `17565` 因 warm-up 路径错误在加载模型前失败，已修正并清理无效产物。第二次 8 步 SDPO smoke `17566` 因 3B 连续返回格式无效、阶段错误或关键字段空白的反馈而在第一次有效更新前中断；未宣称 SDPO 训练启动。归档第 8 行的独立 3B 离线重放在 `transformers` 4.57.0 和 4.51.3 下均重复出现空字段；少样本提示能纠正这条靠近样本，但相当于把具体阶段和方向写入提示，尚未验证抓持与搬运，不能把它当作可靠模型反馈。先保留失败审计，不静默放宽校验器或回退规则反馈。
+
+共同 warm-up 的固定 `test` episode `0..59` 已在本机 4090 完成：完整任务成功 **22/60**、曾抓持 **47/60**、持续抓持 **41/60**。结果是本研究的 0 步基线，与旧 30 集的 14/30 不能混用。PPO 对照已通过 H800 8 环境步 smoke（作业 `17567`，8 个环境动作、4 次优化器更新、终点 checkpoint 正常）；正式 10,000 步 PPO 作业 `17568` 已启动。此时 SDPO 仍未启动，故不能比较两组学习速度。
