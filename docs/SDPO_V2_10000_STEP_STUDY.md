@@ -20,6 +20,8 @@ robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2
 
 固定评测入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh`；robot 上的串行 H800 包装为 `SimplerEnv/scripts/run_sdpo_v2_eval_h800.sbatch`。验证集传 `EVAL_EPISODE_START=0 EVAL_EPISODES=60`，最终测试集传 `EVAL_EPISODE_START=60 EVAL_EPISODES=100 EVAL_NUM_ENVS=5`；使用不同 episode ID，后者不得在中途评测或提示词调试时运行。每组每个 checkpoint 单独指定唯一 `EVAL_LABEL` 和 `VLA_LOAD_PATH`。训练关闭内置评测；累计训练墙钟和优化器步数写入 W&B 及 `environment_steps.json`，避免把固定评测时间算进训练速度。
 
+全部固定验证完成后，用 `SimplerEnv/scripts/summarize_sdpo_v2_10000.py --eval-root experiments/sdpo-v2-10000/evaluation --ppo-run <PPO_WANDB_RUN> --sdpo-run <SDPO_WANDB_RUN> --output-dir experiments/sdpo-v2-10000/analysis` 生成逐 checkpoint CSV 和按环境动作步／训练墙钟分列的成功率曲线。脚本严格要求每组 `test` episode ID 为 `0..59`、搬运字段齐全，并从 checkpoint 元数据读取实际步数和墙钟；两组未完成前的单组图只能作为进度图，不能作为 SDPO/PPO 比较结论。
+
 启动前验证 3B 服务对两图请求可用、模型 ID 和 JSON 结构匹配，并完成少量真实步骤的机制检查；这属于训练启动检查，不是额外的反馈准入实验。反馈连续拒绝、模型服务不可达或产物不完整时停止并保留原件；不得静默回退到规则标签。每个阶段保留完整配置、Git 修订、模型来源、W&B run、原始反馈、图像哈希、更新次数、checkpoint 和逐集评测。W&B 云端不可用时先保存离线 run，实际同步和 API 可见后才标注已上传。完成 smoke 后删除临时脚本、密钥、重复权重和无关日志；保留有效审计与训练结果。
 
 ## 当前状态
