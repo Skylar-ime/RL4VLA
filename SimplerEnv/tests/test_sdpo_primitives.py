@@ -392,6 +392,50 @@ def test_training_evaluation_aggregates_all_requested_episode_batches():
     assert stats == {"success": 1.0}
 
 
+def test_eval_transport_metrics_use_live_grasp_not_accumulated_episode_flag():
+    runner = object.__new__(Runner)
+    runner.args = SimpleNamespace(seed=0, num_envs=1, episode_len=3)
+    runner.device = torch.device("cpu")
+    runner.policy = SimpleNamespace(prep_rollout=lambda: None)
+    runner._get_action = lambda obs, deterministic: (
+        torch.zeros((1, 1)), torch.zeros((1, 7)), torch.zeros((1, 1)),
+    )
+
+    class Environment:
+        def __init__(self):
+            self.env = SimpleNamespace(unwrapped=SimpleNamespace(device=torch.device("cpu")))
+            self.step_index = 0
+
+        def reset(self, obj_set, episode_ids):
+            return torch.zeros((1, 8, 8, 3), dtype=torch.uint8), ["put carrot on plate"], {}
+
+        def step(self, action):
+            self.step_index += 1
+            info = {
+                "is_src_obj_grasped": torch.tensor([True]),
+                "src_on_target": torch.tensor([self.step_index == 3]),
+                "carrot_plate_dist": torch.tensor([0.2 - self.step_index * 0.05]),
+                "success": torch.tensor([self.step_index == 3]),
+            }
+            if self.step_index == 3:
+                info["episode_env_ids"] = [0]
+                info["episode"] = {
+                    "success": [1], "is_src_obj_grasped": [1], "consecutive_grasp": [0],
+                }
+            return torch.zeros((1, 8, 8, 3), dtype=torch.uint8), torch.zeros((1, 1)), torch.tensor([[self.step_index == 3]]), info
+
+        def selected_source_grasped(self):
+            return torch.tensor([self.step_index == 1])
+
+    runner.env = Environment()
+    _, episodes = runner.eval("test", return_episode_stats=True)
+    record = episodes[0]
+    assert record["first_grasp_step"] == 1
+    assert record["carried_target_distance_reduction_m"] == 0.0
+    assert record["reached_target_after_grasp"] is True
+    assert record["released_on_target"] is True
+
+
 def test_action_token_append_preserves_raw_ids():
     policy = object.__new__(OpenVLAPolicy)
 

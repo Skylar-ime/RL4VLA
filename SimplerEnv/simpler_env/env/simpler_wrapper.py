@@ -161,11 +161,8 @@ class SimlerWrapper:
         current_grasped = None
         action_delta = self._process_action(raw_action) if raw_action is not None else None
         root_quaternion = robot.pose.q if version == "relspatial-action-v1" and robot is not None else None
-        if version in {"relspatial-action-v1", "relspatial-outcome-v2"} and hasattr(task, "objs_carrot") and hasattr(task, "select_carrot_ids"):
-            current_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=task.select_carrot_ids.device)
-            for object_index, object_name in enumerate(task.carrot_names):
-                grasped = task.agent.is_grasping(task.objs_carrot[object_name])
-                current_grasped = torch.where(task.select_carrot_ids == object_index, grasped, current_grasped)
+        if version in {"relspatial-action-v1", "relspatial-outcome-v2"}:
+            current_grasped = self.selected_source_grasped()
         if robot is not None:
             active_joints = getattr(robot, "active_joints", [])
             joint_names = [joint.name for joint in active_joints]
@@ -207,6 +204,16 @@ class SimlerWrapper:
                 self.decision_index[index] += 1
             records.append(record)
         return records
+
+    def selected_source_grasped(self):
+        task = self.env.unwrapped
+        if not all(hasattr(task, name) for name in ("objs_carrot", "select_carrot_ids", "carrot_names", "agent")):
+            raise ValueError("Current selected-source grasp state is unavailable")
+        current_grasped = torch.zeros(self.num_envs, dtype=torch.bool, device=task.select_carrot_ids.device)
+        for object_index, object_name in enumerate(task.carrot_names):
+            grasped = task.agent.is_grasping(task.objs_carrot[object_name])
+            current_grasped = torch.where(task.select_carrot_ids == object_index, grasped, current_grasped)
+        return current_grasped
 
     def selected_source_contact(self):
         task = self.env.unwrapped

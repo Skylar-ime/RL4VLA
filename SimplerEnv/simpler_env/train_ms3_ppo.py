@@ -336,13 +336,35 @@ class Runner:
         )
         obs_img, instruction, info = self.env.reset(obj_set=obj_set, episode_ids=episode_ids)
         completed = torch.zeros(self.args.num_envs, dtype=torch.bool, device=self.device)
+        ever_grasped = torch.zeros_like(completed)
+        reached_target_after_grasp = torch.zeros_like(completed)
+        released_on_target = torch.zeros_like(completed)
+        first_grasp_step = torch.full((self.args.num_envs,), -1, dtype=torch.int32, device=self.device)
+        grasp_onset_target_distance = torch.full((self.args.num_envs,), float("inf"), device=self.device)
+        best_carried_target_distance = torch.full_like(grasp_onset_target_distance, float("inf"))
         episode_stats = {}
 
-        for _ in range(self.args.episode_len):
+        for elapsed_step in range(1, self.args.episode_len + 1):
             obs = dict(image=obs_img, task_description=instruction)
             value, action, logprob = self._get_action(obs, deterministic=True)
 
             obs_img, reward, done, env_info = self.env.step(action)
+
+            active = ~completed
+            grasped_now = self.env.selected_source_grasped().reshape(-1).to(torch.bool)
+            on_target_now = env_info["src_on_target"].reshape(-1).to(torch.bool)
+            target_distance = env_info["carrot_plate_dist"].reshape(-1).to(torch.float32)
+            new_grasp = active & grasped_now & ~ever_grasped
+            first_grasp_step[new_grasp] = elapsed_step
+            grasp_onset_target_distance[new_grasp] = target_distance[new_grasp]
+            ever_grasped |= active & grasped_now
+            best_carried_target_distance = torch.where(
+                active & grasped_now,
+                torch.minimum(best_carried_target_distance, target_distance),
+                best_carried_target_distance,
+            )
+            reached_target_after_grasp |= active & ever_grasped & on_target_now
+            released_on_target |= active & ever_grasped & on_target_now & ~grasped_now
 
             # info
             print({k: round(v.to(torch.float32).mean().tolist(), 4) for k, v in env_info.items()
@@ -358,6 +380,16 @@ class Runner:
                         value = float(values[value_index])
                         env_infos[key].append(value)
                         episode_record[key] = value
+                    grasp_step = int(first_grasp_step[env_index].item())
+                    episode_record["first_grasp_step"] = grasp_step if grasp_step >= 0 else None
+                    episode_record["reached_target_after_grasp"] = bool(reached_target_after_grasp[env_index].item())
+                    episode_record["released_on_target"] = bool(released_on_target[env_index].item())
+                    episode_record["carried_target_distance_reduction_m"] = (
+                        float((grasp_onset_target_distance[env_index] - best_carried_target_distance[env_index]).item())
+                        if grasp_step >= 0 else None
+                    )
+                    env_infos["reached_target_after_grasp"].append(float(episode_record["reached_target_after_grasp"]))
+                    env_infos["released_on_target"].append(float(episode_record["released_on_target"]))
                     episode_stats[episode_id] = episode_record
                 if completed.all():
                     break
