@@ -109,7 +109,7 @@ def make_handler(model, served_model_name, api_key):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", required=True)
-    parser.add_argument("--served-model-name", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument("--served-model-name", default="Qwen/Qwen2.5-VL-7B-Instruct")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")

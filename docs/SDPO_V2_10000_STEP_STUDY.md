@@ -1,8 +1,8 @@
-# Qwen2.5-VL-3B 辅助 SDPO：1 万步对照实验
+# Qwen2.5-VL-7B 辅助 SDPO：1 万步对照实验
 
 ## 研究问题与范围
 
-任务为 `PutOnPlateInScene25Main-v3`。两组训练均从同一 `gen-robot/openvla-7b-rlvla-warmup` revision `735fd5d1f4472c4c9f3f998f0e89aa641af5ad03` 初始化，使用 seed 0、相同训练物体集合、并行环境数、采样温度、80 步 episode 上限和 10,000 个**环境动作步**。实验组为 `multimodal-correction-v2` SDPO，外部反馈模型 `Qwen/Qwen2.5-VL-3B-Instruct`；对照组为仓库现有 PPO，不调用外部模型。冻结 warm-up 仅评测。1 个 seed 只能描述本次运行，不能证明跨 seed 稳定性。
+任务为 `PutOnPlateInScene25Main-v3`。两组训练均从同一 `gen-robot/openvla-7b-rlvla-warmup` revision `735fd5d1f4472c4c9f3f998f0e89aa641af5ad03` 初始化，使用 seed 0、相同训练物体集合、并行环境数、采样温度、80 步 episode 上限和 10,000 个**环境动作步**。实验组为 `multimodal-correction-v2` SDPO，外部反馈模型 `Qwen/Qwen2.5-VL-7B-Instruct`；对照组为仓库现有 PPO，不调用外部模型。冻结 warm-up 仅评测。1 个 seed 只能描述本次运行，不能证明跨 seed 稳定性。
 
 研究两个问题：学生在评测时只读取执行前图像和任务指令，随 SDPO 训练是否改善任务成功、抓持与搬运；在相同环境动作步数和相同训练墙钟时间下，SDPO 与 PPO 谁更快达到更高任务成功率。墙钟时间包括环境交互、反馈请求与重试、前后向计算、参数更新；中途评测耗时另列。PPO 和 SDPO 的优化器步数、算法目标不同，需同步记录，不能把同环境步数解释为同更新预算。
 
@@ -16,15 +16,19 @@
 
 ## 资源与执行
 
-robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2` Git 修订；正式训练只申请 **1 张 H800**。本机 **1 张 RTX 4090** 托管 Qwen2.5-VL-3B-Instruct 反馈服务，仅绑定本机私网地址并使用随机 Bearer key 供 H800 作业调用；计算节点到该地址的连通性已用 GPU-free Slurm 作业验证。训练入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_h800.sbatch`，默认 `NUM_ENVS=8`、`BUFFER_INFERBATCH=8`，提高 H800 rollout 与 OpenVLA 前向批量；外部反馈仍逐决策更新。PPO 与 SDPO 在相同 H800 资源配置下串行运行，不能同时争抢 H800。以端到端环境动作步/小时、反馈延迟、优化器步数、GPU 占用和 OOM 为依据调节并行环境数。逐反馈更新的依赖会让 H800 在等待本地 Qwen 时空闲；测量这部分空闲，不以虚假的 100% 利用率作为目标。保持最多两张 GPU 同时占用。
+robot 仓库 `/public/home/s2250018/project/RL4VLA` 与本机使用同一 `ex/v2` Git 修订；正式训练只申请 **1 张 H800**。本机 **1 张 RTX 4090** 托管 Qwen2.5-VL-7B-Instruct 反馈服务，仅绑定本机私网地址并使用随机 Bearer key 供 H800 作业调用；计算节点到该地址的连通性已用 GPU-free Slurm 作业验证。训练入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_h800.sbatch`，默认 `NUM_ENVS=8`、`BUFFER_INFERBATCH=8`，提高 H800 rollout 与 OpenVLA 前向批量；外部反馈仍逐决策更新。PPO 与 SDPO 在相同 H800 资源配置下串行运行，不能同时争抢 H800。以端到端环境动作步/小时、反馈延迟、优化器步数、GPU 占用和 OOM 为依据调节并行环境数。逐反馈更新的依赖会让 H800 在等待本地 Qwen 时空闲；测量这部分空闲，不以虚假的 100% 利用率作为目标。本实验最多同时占用两张 GPU；`17540` 属于独立的 `swarm_decision` 项目，不算本实验训练卡。
 
 固定评测入口为 `SimplerEnv/scripts/run_sdpo_v2_10000_eval.sh`；robot 上的串行 H800 包装为 `SimplerEnv/scripts/run_sdpo_v2_eval_h800.sbatch`。验证集传 `EVAL_EPISODE_SPLIT=validation EVAL_EPISODES=60 EVAL_NUM_ENVS=6`；最终测试集传 `EVAL_EPISODE_SPLIT=final_test EVAL_EPISODES=100 EVAL_NUM_ENVS=5`，后者不得在中途评测或提示词调试时运行。脚本从同一个已版本化 manifest 读取精确 ID，不再用连续的 `EVAL_EPISODE_START` 代表固定分层集。每组每个 checkpoint 单独指定唯一 `EVAL_LABEL` 和 `VLA_LOAD_PATH`。评测动作采样温度仍为仓库默认 `0.6`，固定的是初态和批次随机种子，不是贪心动作；两组需在同一 H800 与同一脚本上比较，不把本机 4090 的成功率混入曲线。训练关闭内置评测；累计训练墙钟和优化器步数写入 W&B 及 `environment_steps.json`，避免把固定评测时间算进训练速度。
 
 全部固定验证完成后，用 `SimplerEnv/scripts/summarize_sdpo_v2_10000.py --eval-root experiments/sdpo-v2-10000/evaluation --episode-manifest SimplerEnv/scripts/sdpo_v2_eval_episodes.json --ppo-run <PPO_WANDB_RUN> --sdpo-run <SDPO_WANDB_RUN> --output-dir experiments/sdpo-v2-10000/analysis` 生成逐 checkpoint CSV 和按环境动作步／训练墙钟分列的成功率曲线。脚本严格要求每组逐集 ID 与 manifest 的分层验证集完全一致、搬运字段齐全，并从 checkpoint 元数据读取实际步数和墙钟；两组未完成前的单组图只能作为进度图，不能作为 SDPO/PPO 比较结论。
 
-启动前验证 3B 服务对两图请求可用、模型 ID 和 JSON 结构匹配，并完成少量真实步骤的机制检查；这属于训练启动检查，不是额外的反馈准入实验。反馈连续拒绝、模型服务不可达或产物不完整时停止并保留原件；不得静默回退到规则标签。每个阶段保留完整配置、Git 修订、模型来源、W&B run、原始反馈、图像哈希、更新次数、checkpoint 和逐集评测。W&B 云端不可用时先保存离线 run，实际同步和 API 可见后才标注已上传。完成 smoke 后删除临时脚本、密钥、重复权重和无关日志；保留有效审计与训练结果。
+启动前验证 7B 服务对两图请求可用、模型 ID 和 JSON 结构匹配，并完成少量真实步骤的机制检查；这属于训练启动检查，不是额外的反馈准入实验。反馈连续拒绝、模型服务不可达或产物不完整时停止并保留原件；不得静默回退到规则标签。每个阶段保留完整配置、Git 修订、模型来源、W&B run、原始反馈、图像哈希、更新次数、checkpoint 和逐集评测。W&B 云端不可用时先保存离线 run，实际同步和 API 可见后才标注已上传。完成 smoke 后删除临时脚本、密钥、重复权重和无关日志；保留有效审计与训练结果。
 
 ## 当前状态
+
+2026-11-20：按用户决定，外部反馈模型从 3B 改回 `Qwen/Qwen2.5-VL-7B-Instruct`。既有 3B 诊断与失败 smoke 仍作为历史记录，不作为 7B 的结果。`17540` 是另一个项目的 H800 作业，不阻止本实验申请一张 H800。7B 仍须通过两图服务、阶段和动作反馈检查，之后才启动正式 SDPO；PPO 对照结果保持不变。
+
+7B 启动检查：本机 4090 成功加载本地完整 7B 权重，robot 可通过两图服务访问模型；相关接口测试 24 项通过。对原 8 步归档第 1、5、8 条重新核对 JPEG 哈希并离线推理，三条均为未抓持、无指尖接触的靠近状态，执行前物体中心距夹爪分别为 0.1644、0.1511、0.1197 m。7B 首次回答虽然把前两条的 `phase` 写成 `approach_source`，却把 `ee_direction_root` 写成无轴名的 `-0.144`、`-0.133`，同时建议 `gripper_operation=CLOSE`、下一步 `grasp_source`；第三条把阶段写成 `grasp_source`，方向写成 `-0.016`，也建议立即闭合。现有严格解析和远距离无接触护栏拒绝这些反馈；第 1、5 条即使按既有三次重试仍未通过方向格式校验。**7B 在当前反馈提示下也未通过启动检查；正式 10,000 步 SDPO 未提交，不能把这个 7B 服务可用性检查当作有效训练或效果证据。**下一步需先修复反馈提示与结构化输出，并用靠近、抓持、搬运归档分别复核，不能把规则修正结果冒称 7B 原始判断。
 
 2026-11-19：3B 权重已下载，本机 4090 服务使用 `transformers==4.51.3`、`torch==2.2.0+cu121` 的独立推理运行时；robot 与本机均为 `ex/v2` 同一 Git 修订。GPU-free Slurm 作业 `17563` 证明计算节点可访问本机私网。第一次 H800 smoke `17565` 因 warm-up 路径错误在加载模型前失败，已修正并清理无效产物。第二次 8 步 SDPO smoke `17566` 因 3B 连续返回格式无效、阶段错误或关键字段空白的反馈而在第一次有效更新前中断；未宣称 SDPO 训练启动。归档第 8 行的独立 3B 离线重放在 `transformers` 4.57.0 和 4.51.3 下均重复出现空字段；少样本提示能纠正这条靠近样本，但相当于把具体阶段和方向写入提示，尚未验证抓持与搬运，不能把它当作可靠模型反馈。先保留失败审计，不静默放宽校验器或回退规则反馈。
 
