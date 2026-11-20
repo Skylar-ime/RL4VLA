@@ -107,6 +107,7 @@ def test_external_feedback_sends_both_images_and_state(monkeypatch):
     assert "gripper +1 OPEN/-1 CLOSE" in content[0]["text"]
     assert "Decoded gripper operation: CLOSE" in content[0]["text"]
     assert "do not claim a closing attempt failed" in content[0]["text"]
+    assert "never write a bare number" in content[0]["text"]
     assert record.to_dict()["feedback_version"] == "multimodal-correction-v2"
     assert record.to_dict()["feedback_schema"] == "robot-root-direction-v2"
     assert record.to_dict()["correction_schema"] == "high-low-retrospective-v2"
@@ -458,6 +459,49 @@ def test_external_feedback_retries_false_gripper_failure_claim(monkeypatch):
     assert len(record.rejection_reasons) == 1
     assert "executed OPEN command" in record.rejection_reasons[0]
     assert "kept the gripper open" in record.correction["retrospective_correction"]
+
+
+def test_external_feedback_retries_premature_closure_without_rule_replacement(monkeypatch):
+    requests = []
+
+    class Response:
+        def __init__(self, correction):
+            self.correction = correction
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+                "choices": [{"message": {"content": json.dumps(self.correction)}}],
+            }).encode()
+
+    def fake_urlopen(request, timeout):
+        requests.append(json.loads(request.data))
+        correction = {field: "unknown" for field in FIELDS}
+        correction.update(
+            phase="approach_source", next_subtask="approach carrot",
+            ee_direction_root="positive x", retrospective_correction="approach before closing",
+            gripper_operation="CLOSE" if len(requests) == 1 else "keep open while approaching",
+        )
+        _with_retrospective_details(correction)
+        return Response(correction)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = ExternalFeedbackClient(base_url="http://localhost:8000/v1", model="Qwen/Qwen2.5-VL-7B-Instruct")
+    image = np.zeros((8, 8, 3), dtype=np.uint8)
+    record = client.generate(
+        instruction="put carrot on plate", before_image=image, after_image=image,
+        outcome=_outcome(), executed_action=[0.01, 0, 0, 0, 0, 0, 1], rollout_step=0,
+    )
+    assert len(requests) == 2
+    assert "closure while far" in record.rejection_reasons[0]
+    assert record.model_correction["gripper_operation"] == "keep open while approaching"
+    assert record.grounding_adjustments == ()
 
 
 def test_online_feedback_updates_once_per_record():

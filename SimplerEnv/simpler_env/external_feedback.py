@@ -446,7 +446,20 @@ class ExternalFeedbackClient:
             "Decoded gripper operation: " + ("OPEN" if action_values[6] > 0 else "CLOSE") + ".\n"
             "If the decoded command kept the gripper OPEN, do not claim a closing attempt failed; "
             "describe it as no closing command instead. Do not infer speed or contact failure from distance alone.\n"
-            "Simulator state change: " + json.dumps(state, ensure_ascii=False)
+            "Simulator state change: " + json.dumps(state, ensure_ascii=False) + "\n"
+            "OUTPUT RULES (apply to both images and state): For ee_direction_root and "
+            "retrospective_direction_root, write axis words such as 'negative z, negative y'; "
+            "never write a bare number such as '-0.144' or a numeric vector. "
+            "A negative z offset means 'negative z', not '-0.144'. "
+            "The gripper_operation and retrospective_gripper_operation fields prescribe what to do, "
+            "not what the executed student did. "
+            "When the source is ungrasped, farther than 0.08 m from the gripper, and has no finger contact, "
+            "use phase='approach_source', next_subtask='approach the source', "
+            "gripper_operation='keep open while approaching', and "
+            "retrospective_gripper_operation='keep open at the original decision'. "
+            "Do not write CLOSE or grasp_source for that observed state. "
+            "Retrospective direction uses the original-decision root offset; current direction uses the after-action root offset. "
+            "Return all 14 fields as one JSON object, no Markdown."
         )
         payload = {
             "model": self.model,
@@ -475,15 +488,15 @@ class ExternalFeedbackClient:
                 model_correction = parse_correction(content)
                 validate_gripper_attribution(model_correction, action_values)
                 validate_retrospective_coverage(model_correction, outcome)
+                validate_stage(model_correction, outcome)
                 correction, adjustments = ground_obvious_contact_errors(model_correction, outcome)
-                validate_stage(correction, outcome)
                 break
             except ValueError as error:
                 rejections.append(str(error))
                 if attempt == 3:
                     raise
                 payload["messages"][0]["content"][0]["text"] = (
-                    verified_facts + prompt + "\nPrevious answer was invalid: " + content[:1500]
+                    prompt + "\nPrevious answer was invalid: " + content[:1500]
                     + "\nValidation error: " + str(error) + "\nReturn corrected JSON only."
                 )
         def section(fields):
